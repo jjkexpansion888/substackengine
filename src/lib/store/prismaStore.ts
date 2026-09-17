@@ -157,6 +157,24 @@ export async function findPublicationById(
     : null;
 }
 
+/**
+ * Connect page: the most recently created publication, so returning users can
+ * reach its radar without reconnecting. Read-only; never exposes the cookie.
+ */
+export async function findLatestPublication(
+  deps: { prisma: PrismaClient },
+): Promise<{
+  id: string;
+  subdomain: string;
+  displayName: string;
+  cookieValid: boolean;
+} | null> {
+  return deps.prisma.publication.findFirst({
+    orderBy: { createdAt: "desc" },
+    select: { id: true, subdomain: true, displayName: true, cookieValid: true },
+  });
+}
+
 /** Route helper: records a session as rejected after a 401/403 from upstream. */
 export async function markCookieInvalid(
   deps: PrismaStoreDeps,
