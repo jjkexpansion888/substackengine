@@ -1,0 +1,93 @@
+// Influencer Radar v1 data model (spec art_OeaCU5nx).
+//
+// Snapshots are append-only and timestamped: a rank must always state its as-of
+// date, so snapshot rows are never updated or deleted — a new run appends new rows.
+//
+// Secrets at rest: the publication session cookie and subscriber emails are never
+// stored in plaintext. The cookie lives in `cookieCiphertext`; emails live in
+// `emailCiphertext` with a keyed HMAC in `emailHash` that backs the uniqueness
+// constraint (deterministic equality lookup without a plaintext column).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Publication {
+  id               String       @id @default(cuid())
+  // Substack's publication id is not exposed by the validated seam yet; the
+  // normalized subdomain is a stable unique stand-in (one publication per domain).
+  substackId       String       @unique
+  subdomain        String
+  displayName      String
+  cookieCiphertext Bytes
+  cookieValid      Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  subscribers      Subscriber[]
+  syncRuns         SyncRun[]
+
+  @@index([subdomain])
+}
+
+model Subscriber {
+  id              String               @id @default(cuid())
+  publicationId   String
+  publication     Publication          @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  substackUserId  String?
+  handle          String?
+  displayName     String?
+  emailCiphertext Bytes?
+  emailHash       String?
+  subscribedAt    DateTime?
+  snapshots       SubscriberSnapshot[]
+
+  @@unique([publicationId, substackUserId])
+  @@unique([publicationId, emailHash])
+  @@unique([publicationId, handle])
+  @@index([publicationId])
+}
+
+model SubscriberSnapshot {
+  id               String     @id @default(cuid())
+  subscriberId     String
+  subscriber       Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  // One as-of timestamp per sync run; every snapshot of a run shares it.
+  capturedAt       DateTime
+  subscriberCount  Int?
+  bestsellerStatus String?
+  // From the owner feed (`activity_rating`) — backs the proxy ladder's
+  // activity rung (probe report art_k1eE1cvA, data-model implication).
+  activityRating   Int?
+  // "public_profile" (lookup consulted, possibly with no count) | "unavailable"
+  source           String
+
+  @@unique([subscriberId, capturedAt])
+  @@index([subscriberId, capturedAt])
+}
+
+// Operational record of one sync run — backs the UI's partial / expired /
+// upstream-change states (which run failed, when, and how far it got).
+model SyncRun {
+  id                 String      @id @default(cuid())
+  publicationId      String
+  publication        Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  startedAt          DateTime
+  finishedAt         DateTime
+  // "completed" | "partial" | "failed"
+  status             String
+  totalFromApi       Int?
+  requestsMade       Int
+  pagesFetched       Int
+  subscribersSeen    Int
+  subscribersMatched Int
+  profilesEnriched   Int
+  profileErrors      Int
+  ceilingHit         Boolean     @default(false)
+  errorName          String?
+
+  @@index([publicationId, startedAt])
+}
