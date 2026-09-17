@@ -28,6 +28,7 @@ model Publication {
   cookieValid      Boolean      @default(true)
   createdAt        DateTime     @default(now())
   subscribers      Subscriber[]
+  syncRuns         SyncRun[]
 
   @@index([subdomain])
 }
@@ -66,4 +67,27 @@ model SubscriberSnapshot {
 
   @@unique([subscriberId, capturedAt])
   @@index([subscriberId, capturedAt])
+}
+
+// Operational record of one sync run — backs the UI's partial / expired /
+// upstream-change states (which run failed, when, and how far it got).
+model SyncRun {
+  id                 String      @id @default(cuid())
+  publicationId      String
+  publication        Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  startedAt          DateTime
+  finishedAt         DateTime
+  // "completed" | "partial" | "failed"
+  status             String
+  totalFromApi       Int?
+  requestsMade       Int
+  pagesFetched       Int
+  subscribersSeen    Int
+  subscribersMatched Int
+  profilesEnriched   Int
+  profileErrors      Int
+  ceilingHit         Boolean     @default(false)
+  errorName          String?
+
+  @@index([publicationId, startedAt])
 }
