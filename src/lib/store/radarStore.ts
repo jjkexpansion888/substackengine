@@ -5,6 +5,23 @@ export type RadarStoreDeps = {
   prisma: PrismaClient;
 };
 
+/** Publication fields the radar page and connect page render. */
+export type RadarPublicationMeta = {
+  id: string;
+  subdomain: string;
+  displayName: string;
+  cookieValid: boolean;
+};
+
+/** The slice of the newest SyncRun the radar header shows. */
+export type LatestSyncRunView = {
+  finishedAt: Date;
+  status: string;
+  subscribersSeen: number;
+  profilesEnriched: number;
+  profileErrors: number;
+};
+
 /**
  * Load every subscriber of a publication with its latest snapshot's rank
  * inputs (the inputs themselves live on SubscriberSnapshot, so any past rank
@@ -46,4 +63,44 @@ export async function loadSubscriberRows(
       activityRating: latest?.activityRating ?? null,
     };
   });
+}
+
+/** Everything the radar page renders, loaded in one call. */
+export type RadarViewData = {
+  publication: RadarPublicationMeta;
+  latestRun: LatestSyncRunView | null;
+  rows: SubscriberRow[];
+};
+
+/**
+ * Load the radar page's data: publication metadata, newest sync run, and the
+ * ranked-input rows. Returns null only when the publication does not exist.
+ */
+export async function loadRadarViewData(
+  deps: RadarStoreDeps,
+  publicationId: string,
+): Promise<RadarViewData | null> {
+  const rows = await loadSubscriberRows(deps, publicationId);
+  if (rows === null) return null;
+
+  const [publication, latestRun] = await Promise.all([
+    deps.prisma.publication.findUnique({
+      where: { id: publicationId },
+      select: { id: true, subdomain: true, displayName: true, cookieValid: true },
+    }),
+    deps.prisma.syncRun.findFirst({
+      where: { publicationId },
+      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+      select: {
+        finishedAt: true,
+        status: true,
+        subscribersSeen: true,
+        profilesEnriched: true,
+        profileErrors: true,
+      },
+    }),
+  ]);
+  if (publication === null) return null;
+
+  return { publication, latestRun, rows };
 }
