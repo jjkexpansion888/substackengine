@@ -28,6 +28,10 @@ describe("connect page", () => {
     const markup = await renderConnect();
     expect(markup).toContain("Connect your Substack publication");
     expect(markup).toContain("substack.sid");
+    // The cookie-copy guidance must name the publication's own domain (the
+    // reader site's cookie context produced rejected sessions in practice).
+    expect(markup).toContain("whitetigercapital.substack.com");
+    expect(markup).toContain("fresh");
     expect(markup).toContain("encrypted at rest");
     expect(markup).toContain("Not stored");
     expect(markup).not.toContain("Connected:");

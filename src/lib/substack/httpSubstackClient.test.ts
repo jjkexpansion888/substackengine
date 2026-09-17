@@ -54,20 +54,28 @@ const subscriberRow = (id: number, name: string, email: string) => ({
 });
 
 describe("validateSession", () => {
-  it("sends the substack.sid cookie and parses the session", async () => {
+  it("POSTs subscriber-stats with the session cookie and returns the derived session", async () => {
     const { fetchImpl, calls } = mockFetch([
-      () => jsonResponse({ id: "u-1", name: "Joon" }),
+      () =>
+        jsonResponse({
+          subscribers: [subscriberRow(1679017, "Tom McAuley", "tom@example.com")],
+          count: 561,
+          lastSync: "2026-09-17T16:04:42Z",
+        }),
     ]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
 
     const session = await client.validateSession("cookie-value");
 
+    // The subscriber-stats envelope carries no owner identity — the session
+    // is the derived subdomain plus an honestly-null displayName.
     expect(session).toEqual({
-      userId: "u-1",
       subdomain: "whitetigercapital",
-      displayName: "Joon",
+      displayName: null,
     });
-    expect(calls[0].url).toBe(`https://${DOMAIN}/api/v1/me`);
+    expect(calls[0].url).toBe(`https://${DOMAIN}/api/v1/subscriber-stats`);
+    expect(calls[0].init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ limit: 1, offset: 0 });
     expect((calls[0].init?.headers as Record<string, string>).cookie).toBe(
       "substack.sid=cookie-value",
     );
@@ -75,14 +83,28 @@ describe("validateSession", () => {
 
   it("throws SessionExpiredError on 401/403", async () => {
     for (const status of [401, 403]) {
-      const { fetchImpl } = mockFetch([() => jsonResponse({ error: "unauthorized" }, status)]);
+      const { fetchImpl } = mockFetch([() => new Response("Not authorized", { status })]);
       const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
       await expect(client.validateSession("expired")).rejects.toBeInstanceOf(SessionExpiredError);
     }
   });
 
+  it("treats a 404 as upstream drift", async () => {
+    const { fetchImpl } = mockFetch([() => new Response("", { status: 404 })]);
+    const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
+    await expect(client.validateSession("cookie")).rejects.toBeInstanceOf(UpstreamChangeError);
+  });
+
   it("treats a reshaped response as upstream drift", async () => {
     const { fetchImpl } = mockFetch([() => jsonResponse({ unexpected: true })]);
+    const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
+    await expect(client.validateSession("cookie")).rejects.toBeInstanceOf(UpstreamChangeError);
+  });
+
+  it("treats a non-JSON 200 body (bot challenge) as upstream drift", async () => {
+    const { fetchImpl } = mockFetch([
+      () => new Response("<html>challenge</html>", { status: 200, headers: { "content-type": "text/html" } }),
+    ]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
     await expect(client.validateSession("cookie")).rejects.toBeInstanceOf(UpstreamChangeError);
   });

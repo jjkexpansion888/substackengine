@@ -113,6 +113,21 @@ function parseProfileJsonBody(body: unknown): ProfileJsonOutcome {
   return { kind: "parsed", count, bestsellerStatus };
 }
 
+/**
+ * subscriber-stats' probe-verified envelope (types.ts endpoint notes): a row
+ * array plus the declared total. Single parser so endpoint drift is a
+ * one-function fix for both the validator and the list path.
+ */
+function parseSubscriberStatsEnvelope(body: unknown): { rows: unknown[]; total: number } {
+  const record = asRecord(body);
+  const rows = record?.subscribers;
+  const total = record?.count;
+  if (!Array.isArray(rows) || typeof total !== "number") {
+    throw new UpstreamChangeError("subscriber-stats response shape changed");
+  }
+  return { rows, total };
+}
+
 function toCount(raw: string): number | null {
   const value = Number.parseInt(raw.replaceAll(",", ""), 10);
   return Number.isSafeInteger(value) ? value : null;
@@ -177,24 +192,39 @@ export function createSubstackClient(options: SubstackClientOptions): SubstackCl
       if (cookie.trim().length === 0) {
         throw new InvalidInputError("session cookie is empty");
       }
+      // GET /api/v1/me was retired by Substack (probe 2026-09-17: 404 HTML on
+      // the publication domain and on substack.com, with and without a cookie).
+      // The authenticated owner-scoped call that still exists is
+      // subscriber-stats: a 200 with the row/total envelope proves the session
+      // is live, while 401/403 (rejected cookie) surface as SessionExpiredError
+      // via request() and a 404 surfaces as drift below.
       const response = await request(
-        `${base}/api/v1/me`,
-        { headers: { cookie: cookieHeader(cookie), "user-agent": userAgent } },
+        `${base}/api/v1/subscriber-stats`,
+        {
+          method: "POST",
+          headers: {
+            cookie: cookieHeader(cookie),
+            "content-type": "application/json",
+            "user-agent": userAgent,
+          },
+          body: JSON.stringify({ limit: 1, offset: 0 }),
+        },
         "session",
       );
       if (!response) {
-        throw new UpstreamChangeError("/api/v1/me returned 404 — endpoint moved?");
+        throw new UpstreamChangeError("subscriber-stats returned 404 — endpoint moved?");
       }
-      const body = asRecord(await response.json());
-      const userId = body ? (pickString(body, "id") ?? pickString(body, "user_id")) : null;
-      if (!userId) {
-        throw new UpstreamChangeError("/api/v1/me response carries no user id");
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch (cause) {
+        throw new UpstreamChangeError("subscriber-stats returned a non-JSON body", { cause });
       }
-      return {
-        userId,
-        subdomain: subdomainFromDomain(host),
-        displayName: body ? pickString(body, "name") : null,
-      };
+      parseSubscriberStatsEnvelope(body);
+      // The envelope carries only subscriber rows and a total — no owner
+      // identity. displayName stays honestly null; the publication record
+      // falls back to the subdomain.
+      return { subdomain: subdomainFromDomain(host), displayName: null };
     },
 
     async listSubscribers(cookie, page): Promise<SubscribersPage> {
@@ -218,12 +248,7 @@ export function createSubstackClient(options: SubstackClientOptions): SubstackCl
       if (!response) {
         throw new UpstreamChangeError("subscriber-stats returned 404 — endpoint moved?");
       }
-      const body = asRecord(await response.json());
-      const rawRows = body?.subscribers;
-      const total = body?.count;
-      if (!Array.isArray(rawRows) || typeof total !== "number") {
-        throw new UpstreamChangeError("subscriber-stats response shape changed");
-      }
+      const { rows: rawRows, total } = parseSubscriberStatsEnvelope(await response.json());
       const subscribers = rawRows
         .map(mapSubscriberRow)
         .filter((row): row is NonNullable<ReturnType<typeof mapSubscriberRow>> => row !== null);

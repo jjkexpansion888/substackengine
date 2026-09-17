@@ -12,7 +12,6 @@ export type RequestKind = "session" | "list" | "profile";
 export type RequestListener = (info: { kind: RequestKind; url: string }) => void;
 
 export type SubstackSession = {
-  userId: string;
   subdomain: string;
   displayName: string | null;
 };
@@ -66,8 +65,17 @@ export type PublicProfile = {
  *   https://substack.com/@<handle> page-HTML extraction when the JSON route
  *   fails (count-less body or transient exhaustion). A JSON 404 means no
  *   profile — nulls, no fallback.
- * - session validation: GET https://<pub-domain>/api/v1/me — NOT
- *   probe-verified; the endpoint is isolated here so drift is contained.
+ * - session validation: POST https://<pub-domain>/api/v1/subscriber-stats
+ *   with body { limit: 1, offset: 0 } — the same probe-verified endpoint as
+ *   the subscriber list. The former session check, GET /api/v1/me, was
+ *   retired by Substack (probe 2026-09-17: 404 HTML on the publication
+ *   domain and on substack.com, with and without a session cookie), so
+ *   validation now proves the session by reading a page of subscriber
+ *   stats. subscriber-stats answers 403 "Not authorized" for missing or
+ *   rejected cookies (route alive, auth refused), which the client maps to
+ *   SessionExpiredError. The response envelope carries no owner identity,
+ *   so SubstackSession holds only what is derivable honestly: the
+ *   subdomain, and a displayName that stays null.
  */
 export interface SubstackClient {
   /** Throws SessionExpiredError on 401/403. */
@@ -96,8 +104,21 @@ export function handleFromUserName(userName: string | null): string | null {
 }
 
 /**
+ * The Substack reader host is not a publication: a bare "substack.com" and a
+ * profile URL ("https://substack.com/@handle") both normalize to it, and a
+ * session check against it validates nothing. Reject both up front with the
+ * fix in the message instead of letting the user hit the misleading
+ * upstream-change banner.
+ */
+function isReaderHost(host: string): boolean {
+  return host === "substack.com" || host === "www.substack.com";
+}
+
+/**
  * Normalize a user-supplied publication domain to a bare hostname
  * ("https://Example.Substack.com/about" -> "example.substack.com").
+ * Profile and reader URLs are rejected — the publication's own domain is
+ * required (e.g. "whitetigercapital.substack.com").
  */
 export function normalizeDomain(input: string): string {
   const host = input
@@ -105,6 +126,11 @@ export function normalizeDomain(input: string): string {
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/\/.*$/, "");
+  if (isReaderHost(host)) {
+    throw new InvalidInputError(
+      `"${input.trim()}" is a Substack reader or profile URL, not a publication. Enter the publication's own domain instead, e.g. whitetigercapital.substack.com`,
+    );
+  }
   if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(host)) {
     throw new InvalidInputError(`not a valid publication domain: ${input}`);
   }
