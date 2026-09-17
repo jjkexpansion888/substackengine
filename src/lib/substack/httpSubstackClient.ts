@@ -25,6 +25,12 @@ const DEFAULT_USER_AGENT =
 export const DEFAULT_PAGE_LIMIT = 50; // probe-verified page size
 const PROFILE_LOOKUP_RETRIES = 2; // spec AC5: failed lookups retry twice
 
+/** Result of the JSON profile route, after transport handling. */
+type ProfileJsonOutcome =
+  /** 404 — no profile exists at this handle. */
+  | { kind: "missing" }
+  | { kind: "parsed"; count: number | null; bestsellerStatus: string | null };
+
 export type SubstackClientOptions = {
   /** Publication domain, e.g. "whitetigercapital.substack.com". */
   domain: string;
@@ -76,6 +82,40 @@ function mapSubscriberRow(raw: unknown) {
     subscriptionInterval: pickString(record, "subscription_interval"),
     activityRating: typeof record.activity_rating === "number" ? record.activity_rating : null,
   };
+}
+
+/**
+ * Extracts public count data from the JSON public_profile endpoint body
+ * (probe report art_k1eE1cvA v3 Corrections: subscriberCountNumber number +
+ * subscriberCount string, followerCount, bestseller_tier). A body without
+ * usable fields parses to nulls — the caller then tries the page fallback.
+ */
+function parseProfileJsonBody(body: unknown): ProfileJsonOutcome {
+  const record = asRecord(body);
+  if (!record) return { kind: "parsed", count: null, bestsellerStatus: null };
+
+  let count: number | null = null;
+  if (typeof record.subscriberCountNumber === "number") {
+    count = Number.isSafeInteger(record.subscriberCountNumber) ? record.subscriberCountNumber : null;
+  } else if (typeof record.subscriberCount === "string" && record.subscriberCount.length > 0) {
+    count = toCount(record.subscriberCount);
+  }
+
+  const tier = record.bestseller_tier;
+  const bestsellerStatus =
+    pickString(record, "bestsellerStatus") ??
+    (typeof tier === "string" && tier.length > 0
+      ? tier
+      : tier === true
+        ? "bestseller"
+        : null);
+
+  return { kind: "parsed", count, bestsellerStatus };
+}
+
+function toCount(raw: string): number | null {
+  const value = Number.parseInt(raw.replaceAll(",", ""), 10);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 /**
@@ -192,21 +232,64 @@ export function createSubstackClient(options: SubstackClientOptions): SubstackCl
 
     async getPublicProfile(handle): Promise<PublicProfile> {
       const profileUrl = `${profileOrigin}/@${encodeURIComponent(handle)}`;
-      // Public page: the owner cookie is deliberately NOT sent (least
+      const jsonUrl = `${profileOrigin}/api/v1/user/${encodeURIComponent(handle)}/public_profile`;
+      // Public endpoints: the owner cookie is deliberately NOT sent (least
       // privilege). Retries live inside the client so the pipeline sees one
       // logical operation per profile.
-      return withBackoff(async () => {
+      const jsonAttempt = async (): Promise<ProfileJsonOutcome> => {
         const response = await request(
-          profileUrl,
-          { headers: { "user-agent": userAgent, accept: "text/html" } },
+          jsonUrl,
+          { headers: { "user-agent": userAgent, accept: "application/json" } },
           "profile",
         );
-        if (!response) {
-          // No profile at that handle: public data absent, not an error.
-          return { handle, name: null, subscriberCount: null, bestsellerStatus: null, profileUrl };
+        if (!response) return { kind: "missing" }; // 404 — no profile at this handle
+        try {
+          return parseProfileJsonBody(await response.json());
+        } catch {
+          // Invalid JSON body: treat as a count-less response and let the
+          // page fallback decide — presence of data is still discoverable.
+          return { kind: "parsed", count: null, bestsellerStatus: null };
         }
-        return { handle, ...parseProfileHtml(await response.text()), profileUrl };
-      }, { ...backoff, maxRetries: PROFILE_LOOKUP_RETRIES });
+      };
+
+      let outcome: ProfileJsonOutcome;
+      try {
+        outcome = await withBackoff(jsonAttempt, { ...backoff, maxRetries: PROFILE_LOOKUP_RETRIES });
+      } catch (error) {
+        // Transient JSON-route failure after retries: fall through to the
+        // page route. Rate limits and endpoint-drift errors propagate —
+        // dodging a 429 via an alternate route would just move the hammering.
+        if (!(error instanceof UpstreamTransientError)) throw error;
+        outcome = { kind: "parsed", count: null, bestsellerStatus: null };
+      }
+
+      if (outcome.kind === "missing") {
+        // No profile at this handle; the page would 404 too.
+        return { handle, name: null, subscriberCount: null, bestsellerStatus: null, profileUrl };
+      }
+      if (outcome.count !== null) {
+        return {
+          handle,
+          name: null,
+          subscriberCount: outcome.count,
+          bestsellerStatus: outcome.bestsellerStatus,
+          profileUrl,
+        };
+      }
+
+      // Fallback transport (probe v2 path): the profile page itself, parsed
+      // for the embedded profile JSON / badge text. Single attempt — the
+      // JSON route already spent its retry budget.
+      const response = await request(
+        profileUrl,
+        { headers: { "user-agent": userAgent, accept: "text/html" } },
+        "profile",
+      );
+      if (!response) {
+        // No page at this handle either: public data absent, not an error.
+        return { handle, name: null, subscriberCount: null, bestsellerStatus: null, profileUrl };
+      }
+      return { handle, ...parseProfileHtml(await response.text()), profileUrl };
     },
   };
 }

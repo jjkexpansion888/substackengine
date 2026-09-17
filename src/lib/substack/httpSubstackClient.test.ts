@@ -194,12 +194,15 @@ describe("listSubscribers", () => {
 });
 
 describe("getPublicProfile", () => {
-  it("extracts the count from the embedded profile JSON (probe shape)", async () => {
+  it("uses the unauthenticated JSON endpoint and returns the exact count (probe v3)", async () => {
     const { fetchImpl, calls } = mockFetch([
       () =>
-        htmlResponse(
-          `<html><script>window._preloads = JSON.parse("{\\"profile\\":{\\"handle\\":\\"tommcauley\\",\\"subscriberCountNumber\\":20}}")</script></html>`,
-        ),
+        jsonResponse({
+          subscriberCountNumber: 20,
+          subscriberCount: "20",
+          followerCount: 5,
+          bestseller_tier: null,
+        }),
     ]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
 
@@ -212,13 +215,50 @@ describe("getPublicProfile", () => {
       bestsellerStatus: null,
       profileUrl: "https://substack.com/@tommcauley",
     });
-    expect(calls[0].url).toBe("https://substack.com/@tommcauley");
-    // Public page: the session cookie must NOT be attached.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://substack.com/api/v1/user/tommcauley/public_profile");
+    // Public endpoint: the session cookie must NOT be attached.
     expect((calls[0].init?.headers as Record<string, string>).cookie).toBeUndefined();
   });
 
-  it("resolves a 404 profile to nulls — never zero, never a throw", async () => {
-    const { fetchImpl } = mockFetch([() => new Response("", { status: 404 })]);
+  it("falls back to the profile page when the JSON body carries no count", async () => {
+    const { fetchImpl, calls } = mockFetch([
+      () => jsonResponse({ unexpected: "shape" }),
+      () =>
+        htmlResponse(
+          `<html><script>window._preloads = JSON.parse("{\\\"profile\\\":{\\\"handle\\\":\\\"tommcauley\\\",\\\"subscriberCountNumber\\\":37}}")</script></html>`,
+        ),
+    ]);
+    const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
+
+    const profile = await client.getPublicProfile("tommcauley");
+
+    expect(profile.subscriberCount).toBe(37);
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://substack.com/api/v1/user/tommcauley/public_profile",
+      "https://substack.com/@tommcauley",
+    ]);
+  });
+
+  it("falls back to the page after the JSON route fails transiently", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const { fetchImpl, calls } = mockFetch([
+      () => jsonResponse({}, 500),
+      () => jsonResponse({}, 500),
+      () => jsonResponse({}, 500), // JSON retries exhausted
+      () => htmlResponse('{\\"subscriberCountNumber\\":7}'), // single-shot fallback
+    ]);
+    const client = createSubstackClient({ domain: DOMAIN, fetchImpl, sleep });
+
+    const profile = await client.getPublicProfile("lucky");
+
+    expect(profile.subscriberCount).toBe(7);
+    expect(calls).toHaveLength(4); // 3 JSON attempts + 1 page attempt
+    expect(sleep.mock.calls).toHaveLength(2); // only the JSON route retries
+  });
+
+  it("resolves a 404 JSON profile to nulls — never zero, no page fetch", async () => {
+    const { fetchImpl, calls } = mockFetch([() => new Response("", { status: 404 })]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
 
     const profile = await client.getPublicProfile("ghost");
@@ -226,35 +266,34 @@ describe("getPublicProfile", () => {
     expect(profile.subscriberCount).toBeNull();
     expect(profile.bestsellerStatus).toBeNull();
     expect(profile.profileUrl).toBe("https://substack.com/@ghost");
+    expect(calls).toHaveLength(1);
   });
 
-  it("resolves an unparseable page to null count (fallback, not zero)", async () => {
-    const { fetchImpl } = mockFetch([() => htmlResponse("<html>profile without data</html>")]);
+  it("resolves both routes missing data to null count (fallback, not zero)", async () => {
+    const { fetchImpl } = mockFetch([
+      () => jsonResponse({ unexpected: true }),
+      () => htmlResponse("<html>profile without data</html>"),
+    ]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
     const profile = await client.getPublicProfile("somebody");
     expect(profile.subscriberCount).toBeNull();
   });
 
-  it("retries transient failures then recovers", async () => {
-    const { fetchImpl, calls } = mockFetch([
-      () => jsonResponse({}, 500),
-      () => htmlResponse('{\\"subscriberCountNumber\\":7}'),
-    ]);
+  it("propagates rate limits instead of dodging them via the page", async () => {
+    const { fetchImpl, calls } = mockFetch([() => jsonResponse({ error: "rate limited" }, 429)]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl });
 
-    const profile = await client.getPublicProfile("lucky");
-
-    expect(profile.subscriberCount).toBe(7);
-    expect(calls).toHaveLength(2);
+    await expect(client.getPublicProfile("busy")).rejects.toBeInstanceOf(RateLimitedError);
+    expect(calls.every((c) => c.url.includes("/public_profile"))).toBe(true); // never the page
   });
 
-  it("gives up after two retries and throws for the caller to contain", async () => {
+  it("gives up when both routes fail and throws for the caller to contain", async () => {
     const sleep = vi.fn().mockResolvedValue(undefined);
     const { fetchImpl, calls } = mockFetch([() => jsonResponse({}, 500)]);
     const client = createSubstackClient({ domain: DOMAIN, fetchImpl, sleep });
 
     await expect(client.getPublicProfile("down")).rejects.toBeInstanceOf(UpstreamTransientError);
-    expect(calls).toHaveLength(3); // initial + 2 retries (spec AC5)
+    expect(calls).toHaveLength(4); // 3 JSON attempts (spec AC5) + 1 page attempt
   });
 });
 

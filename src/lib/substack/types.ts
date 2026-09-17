@@ -60,8 +60,12 @@ export type PublicProfile = {
  * Endpoint notes (probe report art_k1eE1cvA, 2026-09-17):
  * - subscriber list: POST https://<pub-domain>/api/v1/subscriber-stats,
  *   body { limit, offset }, total from the `count` field — probe-verified.
- * - public profile: GET https://substack.com/@<handle> HTML page; the JSON
- *   API /api/v1/user/{id}/public_profile 404s and is deliberately not used.
+ * - public profile: primary GET https://substack.com/api/v1/user/{handle}/
+ *   public_profile — unauthenticated JSON with the exact subscriberCountNumber
+ *   (probe v3 Corrections: 25/25 verified, ~KB payloads); fallback GET
+ *   https://substack.com/@<handle> page-HTML extraction when the JSON route
+ *   fails (count-less body or transient exhaustion). A JSON 404 means no
+ *   profile — nulls, no fallback.
  * - session validation: GET https://<pub-domain>/api/v1/me — NOT
  *   probe-verified; the endpoint is isolated here so drift is contained.
  */
@@ -71,9 +75,10 @@ export interface SubstackClient {
   /** Owner-scoped subscriber list, paginated with Substack's limit/offset contract. */
   listSubscribers(cookie: string, page: SubscribersPageArgs): Promise<SubscribersPage>;
   /**
-   * Public profile lookup for one handle. A missing profile (404) or a page
-   * without parseable count data resolves to null fields — it never throws
-   * and never yields zero. Transport-level failures throw.
+   * Public profile lookup for one handle: JSON endpoint first, profile-page
+   * extraction as fallback. A missing profile (404) or a response without
+   * parseable count data resolves to null fields — it never throws for
+   * absence and never yields zero. Transport-level failures throw.
    */
   getPublicProfile(handle: string): Promise<PublicProfile>;
 }
