@@ -35,7 +35,7 @@ const SORT_KEYS: readonly SubscribersSortKey[] = [
 ];
 
 /** Natural direction per key when the caller does not pass an explicit order. */
-const DEFAULT_ORDER: Record<SubscribersSortKey, SortOrder> = {
+export const DEFAULT_ORDER: Record<SubscribersSortKey, SortOrder> = {
   rank: "asc", // best first
   audience: "desc", // biggest first
   subscribedAt: "asc", // earlier first, matching the ladder tiebreak
