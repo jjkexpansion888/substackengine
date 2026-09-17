@@ -1,5 +1,39 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Local setup
+
+This app talks to PostgreSQL through Prisma. A fresh clone starts fine, but any page that touches the database fails until `DATABASE_URL` is configured.
+
+1. Install dependencies — this also generates the Prisma client:
+
+   ```bash
+   npm install
+   ```
+
+2. Create your local env file and fill in `DATABASE_URL` (local Docker postgres, [Supabase](https://supabase.com), or [Neon](https://neon.tech) all work):
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Create the database schema:
+
+   ```bash
+   npm run db:push
+   ```
+
+4. Start the dev server:
+
+   ```bash
+   npm run dev
+   ```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+### Troubleshooting
+
+If the browser shows the generic `Application error: a server-side exception` page, `DATABASE_URL` is usually missing or unreachable. The real error is in the terminal running `npm run dev` — look for `PrismaClientInitializationError` there. After changing `DATABASE_URL`, restart the dev server.
+
 ## Getting Started
 
 First, run the development server:
