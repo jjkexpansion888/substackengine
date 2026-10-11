@@ -26,6 +26,6 @@ export function rememberPublicAudience(value: unknown, now = Date.now()): void {
 
 export function cachedPublicAudience(identity: ProfileIdentity, now = Date.now()): PublicAudienceSnapshot | null {
   const entry = (identity.id ? entries.get(`id:${identity.id}`) : undefined) ?? (identity.handle ? entries.get(`handle:${identity.handle.toLowerCase()}`) : undefined);
-  if (!entry || entry.expires <= now || (identity.id && entry.snapshot.id && entry.snapshot.id !== identity.id)) return null;
+  if (!entry || entry.expires <= now || (identity.id && entry.snapshot.id !== identity.id)) return null;
   return entry.snapshot;
 }

@@ -1,7 +1,8 @@
 import { loadRadar, removeSavedRadar, saveRadar } from "@/lib/substack/savedRadar";
+import { isLocalRequest } from "@/lib/api/localRequest";
 
 export const runtime = "nodejs";
-const allowed = (request: Request) => request.headers.get("host") === "localhost:3000" && request.headers.get("sec-fetch-site") !== "cross-site" && (!request.headers.get("origin") || request.headers.get("origin") === "http://localhost:3000");
+const allowed = isLocalRequest;
 const headers = { "Cache-Control": "no-store" };
 
 export async function GET(request: Request): Promise<Response> {
@@ -11,7 +12,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  if (!allowed(request) || request.headers.get("origin") !== "http://localhost:3000") return Response.json({ error: "Save scans from the local app." }, { status: 403 });
+  if (!allowed(request, true)) return Response.json({ error: "Save scans from the local app." }, { status: 403 });
   try {
     const reader = request.body?.getReader();
     if (!reader) throw new Error("No scan sent.");
@@ -30,7 +31,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  if (!allowed(request) || request.headers.get("origin") !== "http://localhost:3000") return Response.json({ error: "Remove saved scans from the local app." }, { status: 403 });
+  if (!allowed(request, true)) return Response.json({ error: "Remove saved scans from the local app." }, { status: 403 });
   try {
     await removeSavedRadar(new URL(request.url).searchParams.get("domain") ?? "");
     return Response.json({ removed: true }, { headers });

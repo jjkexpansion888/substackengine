@@ -12,7 +12,7 @@ describe("public subscriber enrichment", () => {
     expect(publicJson).not.toHaveBeenCalled();
   });
   it("deduplicates handles and preserves zero and unknown counts", async () => {
-    vi.mocked(publicJson).mockImplementation(async url => url.includes("zero") ? { subscriberCountNumber: 0, subscriberCount: "0", bestseller_tier: 0 } : {});
+    vi.mocked(publicJson).mockImplementation(async url => url.includes("zero") ? { handle: "zero", subscriberCountNumber: 0, subscriberCount: "0", bestseller_tier: 0 } : {});
     const response = await POST(request(["zero", "zero", "unknown"]));
     expect(await response.json()).toMatchObject({ profiles: [{ handle: "zero", audience: 0, status: "public", bestseller: false }, { handle: "unknown", audience: null, status: "not_public" }], stopped: false });
     expect(publicJson).toHaveBeenCalledTimes(2);
@@ -34,7 +34,7 @@ describe("public subscriber enrichment", () => {
   it("continues past an individually restricted profile without bypassing its check", async () => {
     vi.mocked(publicJson).mockImplementation(async url => {
       if (url.includes("restrictedindividual")) throw new PublicAccessRequiredError("restricted profile");
-      return { subscriberCountNumber: 589 };
+      return { handle: /\/user\/([^/]+)/.exec(url)?.[1], subscriberCountNumber: 589 };
     });
     const body = await (await POST(request(["restrictedindividual", "unrestrictedone", "unrestrictedtwo"]))).json();
     expect(body.stopped).toBe(false);

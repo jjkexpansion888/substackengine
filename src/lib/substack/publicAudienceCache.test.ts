@@ -23,7 +23,8 @@ describe("shared public audience cache", () => {
   });
   it("matches a publicly verified handle without inventing its numeric ID", () => {
     rememberPublicAudience({ handle: "cachehandleonly", publicAudience: { count: 142, label: "142", bestseller: false } }, 1000);
-    expect(cachedPublicAudience({ id: "9876506", handle: "cachehandleonly" }, 1001)?.publicAudience.count).toBe(142);
+    expect(cachedPublicAudience({ handle: "cachehandleonly" }, 1001)?.publicAudience.count).toBe(142);
+    expect(cachedPublicAudience({ id: "9876506", handle: "cachehandleonly" }, 1001)).toBeNull();
     expect(cachedPublicAudience({ id: "9876506" }, 1001)).toBeNull();
   });
 });

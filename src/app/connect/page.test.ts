@@ -9,7 +9,8 @@ describe("connect page", () => {
     expect(markup).toContain("Publication domain");
     expect(markup).not.toContain("substack.sid");
     expect(markup).toContain("complete subscriber list");
-    expect(markup).not.toContain("Collaboration finder");
-    expect(markup).not.toContain("Content opportunities");
+    expect(markup).not.toContain('aria-label="Header features"');
+    expect(markup).not.toContain('aria-label="Engine features"');
+    expect(markup).not.toContain("Sync private subscribers");
   });
 });

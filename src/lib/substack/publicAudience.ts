@@ -37,6 +37,9 @@ export async function lookupPublicAudience(identity: ProfileIdentity, getJson: (
     try { profile = record(await getJson(`https://substack.com/api/v1/user/${encodeURIComponent(handle)}/public_profile`)); }
     catch (error) { if (!(error instanceof UpstreamTransientError) || !getPage) throw error; }
     if (profile.id !== undefined && identity.id && String(profile.id) !== identity.id) throw new UpstreamChangeError("Public profile identity did not match this subscriber.");
+    if (Object.keys(profile).length && !identity.id && handleOf(profile.handle) !== handle) throw new UpstreamChangeError("Public profile identity did not match this subscriber.");
+    // An ID-bearing import needs that ID verified, not just a response to its handle.
+    if (identity.id && profile.id === undefined) profile = {};
   }
   if (getPage && (!handle || audienceFromProfile(profile).audience === null)) {
     const path = handle ? `@${encodeURIComponent(handle)}` : /^\d{1,30}$/.test(identity.id ?? "") ? `profile/${identity.id}` : null;

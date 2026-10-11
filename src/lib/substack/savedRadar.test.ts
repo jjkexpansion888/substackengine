@@ -4,11 +4,27 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { discoverPublicRadar } from "./publicRadar";
 import { loadRadar, parseSavedRadar, saveRadar } from "./savedRadar";
+import { parseSubscriberCsv } from "./subscriberCsv";
 
 const packet = { version: 2 as const, sourceUrl: "https://example.substack.com/publish/subscribers", capturedAt: "2026-10-11T12:00:00Z", totalCount: 638, rowsRead: 638, subscribers: [{ id: "12", handle: "reader", name: "Reader", publicAudience: { count: 849, label: "849", bestseller: false } }] };
 const fixture = async () => ({ version: 1, radar: await discoverPublicRadar("example", async url => url.includes("archive") ? [] : {}, packet), subscriberImport: packet });
 
 describe("persistent local radar snapshots", () => {
+  it("replaces an old owner snapshot with a new CSV roster and restores unresolved rows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "saved-csv-"));
+    try {
+      await saveRadar(await fixture(), root);
+      const csv = parseSubscriberCsv("Name,Email\nUnresolved,private@example.test", "example.substack.com").packet;
+      const radar = await discoverPublicRadar("example", async url => url.includes("archive") ? [] : {}, csv);
+      await saveRadar({ version: 1, radar, subscriberImport: csv }, root);
+      const restored = await loadRadar("example.substack.com", root);
+      expect(restored?.subscriberImport).toEqual(csv);
+      expect(restored?.radar.subscriberCoverage.source).toBe("file_import");
+      expect(restored?.radar.people).toHaveLength(1);
+      expect(restored?.radar.people[0]).toMatchObject({ id: "csv:1", name: "Unresolved", audience: null, subscriberEvidence: "file_list" });
+      expect(await readFile(join(root, "example.substack.com.json"), "utf8")).not.toContain("private@example.test");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("restores the owner roster, counts and metadata from disk after memory is gone", async () => {
     const root = await mkdtemp(join(tmpdir(), "saved-radar-"));
     try {

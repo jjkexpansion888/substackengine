@@ -8,12 +8,13 @@ import { ConnectFormView, type ConnectPhase } from "./ConnectFormView";
 import { SubscribersPanel } from "@/components/radar/SubscribersPanel";
 import { CollaborationFinder } from "@/components/collaboration/CollaborationFinder";
 import { ContentOpportunities } from "@/components/opportunities/ContentOpportunities";
-import { parseSubscriberImport, type SubscriberImport } from "@/lib/substack/subscriberRanking";
+import { type SubscriberImport } from "@/lib/substack/subscriberRanking";
 import { readSubscriberImport, saveSubscriberImport, removeSubscriberImport } from "@/lib/substack/browserImportStorage";
 import type { PublicAudienceSnapshot } from "@/lib/substack/publicAudienceCache";
 import type { SavedRadar } from "@/lib/substack/savedRadar";
 import { mergeAudienceResults, pendingAudienceProfiles, type EnrichedAudience } from "@/lib/substack/audienceQueue";
 import { radarFeatures } from "@/lib/radar/featureAccess";
+import { applyCsvRoster } from "@/lib/substack/csvRoster";
 
 function browserStorage(): Storage | undefined {
   try { return window.localStorage; } catch { return undefined; }
@@ -41,8 +42,8 @@ export function ConnectForm() {
   const saves = useRef<Promise<void>>(Promise.resolve());
   const audienceAttempts = useRef(new Set<string>());
   const [audienceQueue, setAudienceQueue] = useState<"idle" | "running" | "paused" | "done">("idle");
+  const [namesMatching, setNamesMatching] = useState(false);
   const importedList = useRef<{ domain: string; packet: SubscriberImport } | null>(null);
-  const syncClaim = useRef<Promise<SubscriberImport> | null>(null);
   const busy = phase.kind === "connecting" || returningToSearch;
   const features = radarFeatures(radar?.subscriberCoverage.source);
   const feature = features.includes(selectedFeature) ? selectedFeature : "Radar";
@@ -88,26 +89,6 @@ export function ConnectForm() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const syncToken = params.get("browserSync");
-    if (syncToken) {
-      setPhase({ kind: "connecting" });
-      // Reuse the one-time claim promise across React Strict Mode effect replays.
-      syncClaim.current ??= fetch(`/api/browser-connect?token=${encodeURIComponent(syncToken)}`, { cache: "no-store" }).then(async response => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error ?? "Could not receive browser sync.");
-        return parseSubscriberImport(body.packet);
-      });
-      let active = true;
-      void syncClaim.current.then(async packet => {
-        if (!active) return;
-        const target = new URL(packet.sourceUrl).hostname;
-        importedList.current = { domain: target, packet };
-        setDomain(target);
-        window.history.replaceState(null, "", `/connect?domain=${encodeURIComponent(target)}`);
-        await scan(target, packet);
-      }).catch(error => { if (active) setPhase({ kind: "error", message: error instanceof Error ? error.message : "Browser sync failed." }); });
-      return () => { active = false; };
-    }
     const target = params.get("domain");
     if (target) {
       setDomain(target);
@@ -129,8 +110,18 @@ export function ConnectForm() {
     }
   }, [scan]);
 
+  const importRoster = async (packet: SubscriberImport) => {
+    if (!radar || packet.version !== 3) return scan(radar?.domain ?? domain, packet);
+    const updated = applyCsvRoster(radar, packet);
+    importedList.current = { domain: radar.domain, packet };
+    saveSubscriberImport(radar.domain, packet, browserStorage());
+    audienceAttempts.current.clear();
+    setAudienceQueue("idle");
+    setRadar(updated);
+  };
+
   useEffect(() => {
-    if (!radar || busy || audienceQueue === "paused") return;
+    if (!radar || busy || namesMatching || audienceQueue === "paused") return;
     const batch = pendingAudienceProfiles(radar.people, audienceAttempts.current).slice(0, 20);
     if (!batch.length) { if (audienceQueue !== "done") setAudienceQueue("done"); return; }
     let active = true;
@@ -157,7 +148,7 @@ export function ConnectForm() {
     return () => { active = false; window.clearTimeout(timer); controller.abort(); };
     // Queue state alone must not cancel an in-flight batch when it becomes "running".
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [radar, busy]);
+  }, [radar, busy, namesMatching]);
 
   useEffect(() => {
     if (!radar || busy) return;
@@ -187,9 +178,8 @@ export function ConnectForm() {
     let active = true;
     const sharePublicCounts = async () => {
       try {
-        const response = await fetch("/api/browser-connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "audience-cache",
+        const response = await fetch("/api/subscribers/audience-cache", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           identities: radar.people.map(p => ({ id: /^\d{1,30}$/.test(p.id) ? p.id : undefined, handle: p.handle })),
-          profiles: radar.people.filter(p => p.handle && p.audience !== null).map(p => ({ id: /^\d{1,30}$/.test(p.id) ? p.id : undefined, handle: p.handle, publicAudience: { count: p.audience, label: p.audienceLabel, bestseller: p.bestseller } })),
         }) });
         if (!response.ok) return;
         const body = await response.json() as { profiles: PublicAudienceSnapshot[] };
@@ -261,7 +251,7 @@ export function ConnectForm() {
   };
 
   return <div className="app-shell">
-    <header className="app-nav"><div className="app-header-main"><a className="brand" href="/connect"><BrandLogo size={40} priority />Substack Engine</a>{features.length > 1 && <nav className="header-feature-nav" aria-label="Header features">{features.map(item => <button key={item} aria-current={feature === item ? "page" : undefined} onClick={() => selectFeature(item)}>{item}</button>)}</nav>}</div><div className="local-status"><span />{radar?.subscriberCoverage.source === "owner_session" ? "Owner connected" : "Public data"}</div></header>
+    <header className="app-nav"><div className="app-header-main"><a className="brand" href="/connect"><BrandLogo size={40} priority />Substack Engine</a>{features.length > 1 && <nav className="header-feature-nav" aria-label="Header features">{features.map(item => <button key={item} aria-current={feature === item ? "page" : undefined} onClick={() => selectFeature(item)}>{item}</button>)}</nav>}</div><div className="account-actions"><div className="local-status"><span />{radar?.subscriberCoverage.source === "file_import" ? "CSV imported" : "Public data"}</div></div></header>
     <main className="workspace">
       <div className="workspace-label"><Activity size={15} /> PUBLICATION INTELLIGENCE</div>
       {features.length > 1 && <nav className="feature-nav" aria-label="Engine features">{features.map(item => <button key={item} aria-current={feature === item ? "page" : undefined} onClick={() => selectFeature(item)}>{item === "Radar" ? <Radar size={18} /> : item === "Collaboration finder" ? <Handshake size={18} /> : <Lightbulb size={18} />}{item}</button>)}</nav>}
@@ -271,7 +261,7 @@ export function ConnectForm() {
           <ConnectFormView domain={domain} phase={phase} onDomainChange={setDomain} onSubmit={() => void scan(domain)} />
         </section>
         <section className="coverage-section"><h2>Public activity, in focus</h2><div className="coverage-grid"><div><Users size={20} /><h3>People</h3><p>Readers and contributors visible in recent public discussions.</p></div><div><Activity size={20} /><h3>Audience signals</h3><p>Public audience sizes, publisher profiles, and bestseller badges.</p></div><div><FileText size={20} /><h3>Recent posts</h3><p>Publication activity and the conversations around it.</p></div></div></section>
-        <p className="coverage-note">Coverage is limited to public activity. The complete subscriber list and email addresses require owner access.</p>
+        <p className="coverage-note">Public coverage is partial. Import your complete subscriber list as a CSV after opening your publication; email addresses are removed before upload.</p>
       </> : <>
         <section className="publication-heading"><div className="publication-identity"><Avatar key={radar.domain} src={radar.logoUrl} name={radar.name} large /><div><h1>{radar.name}</h1><a href={`https://${radar.domain}`} target="_blank" rel="noreferrer">{radar.domain}<ArrowUpRight size={13} /></a></div></div><div className="heading-actions"><button className="secondary-button" onClick={() => void backToSearch()} disabled={busy}><ArrowLeft size={16} />Back to search</button><button className="secondary-button" onClick={() => void scan(radar.domain)} disabled={busy}><RefreshCw size={16} className={phase.kind === "connecting" ? "spin" : ""} />{phase.kind === "connecting" ? "Scanning…" : "Refresh"}</button></div></section>
         {radar.description && <p className="publication-description">{radar.description}</p>}
@@ -284,9 +274,9 @@ export function ConnectForm() {
         {feature === "Collaboration finder" && <CollaborationFinder key={radar.domain} radar={radar} />}
         {feature === "Content opportunities" && <ContentOpportunities key={radar.domain} radar={radar} />}
         {feature === "Radar" && <>
-        <section className="metrics"><div><span>Reported subscribers</span><strong>{radar.subscriberCoverage.totalLabel ?? radar.subscriberCoverage.totalCount?.toLocaleString() ?? "Unknown"}</strong><small>Creator profile total</small></div><div><span>Profiles in ranking</span><strong>{radar.subscriberCoverage.discovered.toLocaleString()}</strong><small>{radar.subscriberCoverage.enriched} audience lookups completed</small></div><div><span>Posts scanned</span><strong>{radar.postsScanned}</strong><small>Most recent archive entries</small></div><div><span>Last scan</span><strong className="time-metric">{new Date(radar.scannedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</strong><small>{new Date(radar.scannedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</small></div></section>
+        <section className="metrics"><div><span>{radar.subscriberCoverage.source === "file_import" ? "Imported subscribers" : "Reported subscribers"}</span><strong>{radar.subscriberCoverage.totalLabel ?? radar.subscriberCoverage.totalCount?.toLocaleString() ?? "Unknown"}</strong><small>{radar.subscriberCoverage.source === "file_import" ? "Unique rows in your CSV" : "Creator profile total"}</small></div><div><span>Profiles in ranking</span><strong>{radar.subscriberCoverage.discovered.toLocaleString()}</strong><small>{radar.subscriberCoverage.enriched} audience lookups completed</small></div><div><span>Posts scanned</span><strong>{radar.postsScanned}</strong><small>Most recent archive entries</small></div><div><span>Last scan</span><strong className="time-metric">{new Date(radar.scannedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</strong><small>{new Date(radar.scannedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</small></div></section>
         <div className="view-tabs" role="tablist" aria-label="Radar views">{["Subscribers", "People", "Recent posts"].map(view => <button key={view} role="tab" aria-selected={tab === view} onClick={() => setTab(view)}>{view === "Recent posts" ? <FileText size={16} /> : <Users size={16} />}{view}<span>{view === "Subscribers" ? radar.subscriberCoverage.discovered : view === "People" ? radar.people.length : radar.posts.length}</span></button>)}</div>
-        {tab === "Subscribers" ? <SubscribersPanel key={radar.domain} radar={radar} busy={busy} onImport={packet => scan(radar.domain, packet)} onRemoveImport={() => void removeImportedList()} onUpdate={updatedPeople => setRadar(current => current ? { ...current, people: updatedPeople, subscriberCoverage: { ...current.subscriberCoverage, enriched: updatedPeople.filter(p => p.role === "Reader" && p.membership === "Subscriber" && p.handle && p.audienceStatus !== "unavailable").length } } : current)} /> : tab === "People" ? <section>
+        {tab === "Subscribers" ? <SubscribersPanel importedPacket={importedList.current?.packet} key={radar.domain} radar={radar} busy={busy} onMatchingStateChange={setNamesMatching} onImport={importRoster} onRemoveImport={() => void removeImportedList()} onUpdate={updatedPeople => setRadar(current => current ? { ...current, people: updatedPeople, subscriberCoverage: { ...current.subscriberCoverage, enriched: updatedPeople.filter(p => p.role === "Reader" && p.membership === "Subscriber" && p.handle && p.audienceStatus !== "unavailable").length } } : current)} /> : tab === "People" ? <section>
           <div className="table-toolbar"><div className="search-field"><Search size={17} /><input aria-label="Search people" placeholder="Search people or publications…" value={search} onChange={e => setSearch(e.target.value)} /></div><select aria-label="Filter people" value={filter} onChange={e => setFilter(e.target.value)}>{["Readers", "Public subscribers", "All people"].map(v => <option key={v}>{v}</option>)}</select><select aria-label="Sort people" value={sort} onChange={e => setSort(e.target.value)}><option value="audience">Audience: high to low</option><option value="comments">Most active</option><option value="name">Name: A to Z</option></select><button className="icon-button" title="Export filtered people as CSV" aria-label="Export CSV" onClick={exportCsv} disabled={!people.length}><Download size={17} /></button></div>
           <div className="table-scroll"><table className="people-table"><thead><tr><th>#</th><th>Person</th><th>Public audience <ArrowDown size={12} /></th><th>Activity</th><th>Relationship</th><th><span className="sr-only">Profile</span></th></tr></thead><tbody>{people.map((p, i) => <tr key={p.id}><td className="rank-cell">{i + 1}</td><td><div className="person-cell"><Avatar src={p.photoUrl} name={p.name} /><div><a href={p.profileUrl ?? undefined} target="_blank" rel="noreferrer">{p.name}</a><small>{p.publicationName ?? (p.handle ? `@${p.handle}` : "Public profile")}</small></div></div></td><td><span className="audience-value">{p.audienceLabel ?? (p.audience === null ? p.audienceStatus === "not_public" ? "Not public" : "Unavailable" : p.audience.toLocaleString())}</span>{p.bestseller && <span className="bestseller">Bestseller</span>}</td><td><span className="activity-cell"><MessageCircle size={14} />{p.comments}</span></td><td><span className={p.role === "Author" ? "relationship author" : p.membership === "Subscriber" ? "relationship subscriber" : "relationship"}>{p.role === "Author" ? "Contributor" : p.membership}</span></td><td>{p.profileUrl && <a className="profile-link" href={p.profileUrl} target="_blank" rel="noreferrer" aria-label={`Open ${p.name}'s profile`}><ArrowUpRight size={17} /></a>}</td></tr>)}</tbody></table></div>
           {!people.length && <div className="empty-results"><Users size={28} /><h3>{search ? "No matching people" : "No public readers found"}</h3><p>{search ? "Try a different name or publication." : "Try All people to see contributors. Private or closed discussions may have no visible readers."}</p></div>}
@@ -294,7 +284,7 @@ export function ConnectForm() {
         </section> : <section className="posts-list">{radar.posts.map(post => <a key={post.id} href={post.url ?? undefined} target="_blank" rel="noreferrer" className="post-row">{post.image &&
           // eslint-disable-next-line @next/next/no-img-element
           <img src={post.image} alt="" />}<div><small>{post.date ? new Date(post.date).toLocaleDateString([], { month: "short", day: "numeric" }) : "Date unavailable"}</small><h3>{post.title}</h3><span>{post.reactions} reactions · {post.comments} comments</span></div><ArrowUpRight size={18} /></a>)}{!radar.posts.length && <p className="empty-results">No public archive posts found.</p>}</section>}
-        <aside className="data-note"><Globe size={17} /><div><strong>{radar.subscriberCoverage.source === "owner_session" ? "Owner session coverage" : "Public coverage"}</strong><p>{radar.subscriberCoverage.source === "owner_session" ? "Subscriber membership comes from your signed-in owner snapshot. Audience rankings still use public profile data; unavailable audience sizes remain unknown." : `Discussions are sampled from ${radar.postsScanned} recent posts and up to 50 top-level comments per post, plus visible replies. Subscriber evidence comes from public lists or comment metadata; this is not the complete subscriber list.`}</p>{radar.warnings.map(w => <p key={w} className="warning">{w}</p>)}</div></aside>
+        <aside className="data-note"><Globe size={17} /><div><strong>{radar.subscriberCoverage.source === "file_import" ? "Imported roster coverage" : radar.subscriberCoverage.source === "owner_session" ? "Saved roster coverage" : "Public coverage"}</strong><p>{radar.subscriberCoverage.source === "file_import" ? "Subscriber membership is supplied by your CSV. Account matching uses explicit public identities only; unknown accounts and audience sizes stay unresolved." : radar.subscriberCoverage.source === "owner_session" ? "Subscriber membership comes from your signed-in owner snapshot. Audience rankings still use public profile data; unavailable audience sizes remain unknown." : `Discussions are sampled from ${radar.postsScanned} recent posts and up to 50 top-level comments per post, plus visible replies. Subscriber evidence comes from public lists or comment metadata; this is not the complete subscriber list.`}</p>{radar.warnings.map(w => <p key={w} className="warning">{w}</p>)}</div></aside>
         </>}
       </>}
       <footer className="app-footer"><span>SUBSTACK ENGINE</span><span role="status">{radar && saveStatus === "saved" ? "Saved locally" : radar && saveStatus === "saving" ? "Saving..." : "Independent publication research"}</span></footer>

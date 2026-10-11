@@ -1,15 +1,17 @@
 # Substack Engine
 
-Substack Engine combines public audience research with owner-only collaboration and editorial planning tools, built with Next.js. Enter a Substack subdomain, publication URL, custom domain, or profile URL (`substack.com/@handle`) to discover people in recent public discussions and their public audience signals. Profile URLs and `@handles` resolve to the profile's primary publication.
+Substack Engine combines public audience research with collaboration and editorial planning tools, built with Next.js. Enter a Substack subdomain, publication URL, custom domain, or profile URL (`substack.com/@handle`) to use all three features without logging in or installing an extension. Profile URLs and `@handles` resolve to the profile's primary publication. Subscriber CSV import is optional.
 
 ## Capabilities
 
 - **Radar:** discover public participants, rank readers by available audience signals, filter evidence, recover missing counts, and export results.
-- **Owner connection:** sync a sanitized subscriber roster from your signed-in Chrome session without copying cookies or email addresses.
+- **Subscriber CSV import:** preview and deduplicate an exported roster, match explicit public accounts, fetch their public subscriber counts, and rank them. Email addresses stay off the server.
 - **Collaboration Finder:** rank potential partners, diversify recommendations, learn from ratings, and track outreach and manually verified outcomes.
 - **Content Opportunities:** compare your writing with outside Substacks, identify supported editorial hypotheses, and read topic-specific research briefs linked to your archive.
 
-Public searches open Radar only. Collaboration Finder and Content Opportunities become available after an owner-session sync and load only when selected.
+Every opened publication includes Radar, Collaboration Finder, and Content Opportunities in the navigation. Radar is the initial view; the other tools load only when selected, without requiring owner access.
+
+Export your subscriber list from Substack, then choose **Import subscribers** in Radar. No extension, OAuth, password, or cookie is required. Importing a file does not establish publication ownership.
 
 ## Getting Started
 
@@ -30,21 +32,31 @@ The Subscribers view ranks identified readers by their public subscriber count, 
 
 The reported subscriber total is shown separately from the number of profiles available to rank. It comes from the creator profile and can span multiple publications. A domain-only comment scan is explicitly labeled partial, not a complete list.
 
-For your own publication, use the [Chrome connector](chrome-extension/README.md) on your signed-in Subscribers dashboard and click **Sync to local app**. It reads the owner list in pages of 50 with Chrome's session, without copying cookie values, and opens the local app automatically. No export file or manual import is required. Only IDs, names, and explicit public handles are sent; emails are discarded in Chrome. Rows without public handles remain in the roster with unknown audience sizes. Identities are never guessed from names or emails. The connector requests optional localhost access; it does not require the ChatGPT Chrome extension.
+## Subscriber CSV Import
 
-For someone else's publication, the connector can export loaded rows from the public Subscribers page. The public list is creator-scoped, can span multiple publications, and excludes private subscriptions. No blanket host or cookie-reading permission is required.
+Export your list from your publication's Subscribers dashboard, then choose **Import subscribers**, select the CSV, review the counts, and choose **Import and rank**. Files can contain up to 10,000 rows and 5 MB. Quoted fields, multiline values, BOMs, and common delimiter formats use Papa Parse. Legacy sanitized JSON exports remain readable.
 
-Private subscriber lists require the owner's signed-in browser session and cannot be inferred from a domain. Direct sync uses a random one-use handoff held in localhost server memory for at most five minutes. The local app automatically saves the sanitized roster, radar results and recovered counts in `.local-data/radar/<domain>.json`, with owner-only file permissions and atomic writes. Reopening the publication restores the saved snapshot without another extension sync or network scan. Refresh updates public activity; a new Chrome sync is needed only to update the owner roster. Cookies and email fields are excluded. These private local files are ignored by Git. Remove imported list also removes its saved snapshot. Direct sync is for the single-process local server on port 3000. Explicit public imports are retained in local browser storage by domain and can be removed in the app. The connection form starts empty and does not remember previous domains.
+Account matching uses explicit `user_id` / `substack_user_id`, `handle` / `user_handle`, or `profile_url` / `user_profile_url` / `substack_profile_url` columns. Profile URLs must point to `https://substack.com/@handle` or `https://substack.com/profile/<numeric-id>`. IDs stay strings, including large IDs. Duplicate IDs, handles, or email rows are reconciled locally; conflicting identities reject the file rather than attaching the wrong audience. Subscriber-count columns in CSV are not trusted.
 
-Substack's public web endpoints are unofficial and may change or restrict access. Partial scans report unavailable discussions or profiles rather than fabricating results.
+**An email-only Substack export cannot reliably reveal public account identities.** Rows without names or explicit identities remain unresolved. Named rows can be matched automatically to likely public accounts; these guesses are labeled separately from explicit identities. Emails are discarded before transmission and persistence and never used for guessing. Counts are checked against the selected public account, which does not verify that the subscriber is that person. Known subscriber counts rank highest, then bestseller badges, then unknown audiences. Unknown is not zero; follower counts are not substituted. Public counts may be rounded, unpublished, or temporarily unavailable.
 
-Connector 0.4.2 resumes public profile lookups from a localhost memory cache, checkpoints every 25 profiles, and allows up to fifteen minutes rather than stopping after four. The cache holds only public IDs, handles, subscriber counts and bestseller flags, never owner membership or rosters. Open local views pick up recovered counts every 15 seconds, and refresh reuses those counts. Restarting the server clears the cache. After updating the connector, reload it in Chrome's extension manager before starting another sync.
+Sanitized imports are retained per publication in browser storage. The local app also saves radar snapshots and recovered counts in ignored `.local-data/radar/<domain>.json` files. Remove imported list removes the saved roster. Existing saved owner snapshots remain readable for compatibility, but browser sync and its extension have been removed. The public-count cache stores only public identifiers and audience signals in server memory; restarting the server clears it.
+
+**Automatic account matching** searches all remaining imported names in resumable runs, with five names per request. Normalized exact-name matches (including accents, punctuation and reordered name tokens) are assigned without confirmation. Ties prefer accounts with a publication, not the largest audience; duplicate assignments are skipped. Name search does not fetch audience counts or profile pages. Count enrichment pauses during name matching and resumes afterward, so restricted count lookups do not block identity discovery. Cached exact-name candidates are applied first, and matches enter the ranking after each batch. Guesses retain their similarity score in saved rosters and are labeled "Inferred match" in the table and CSV export; the score is not an identity probability. Names are sent to Substack for search; emails are never sent. Counts are checked against the chosen public account, not assumed from its name. Rate limits or access checks on the search endpoint stop the run; resuming retries unavailable or unattempted names. Profiles absent from public search remain unresolved.
+
+Rate-limited name searches automatically resume after a cooldown, backing off after repeated failures. Three consecutive retries without progress pause the run. Access restrictions are not automatically retried. Matching continues while the subscriber view stays open; stopping or leaving the view preserves completed matches and search results.
+
+When search itself provides a positive public subscriber count on a valid profile ID/handle, the server caches it for that account without an extra profile request. Follower counts, nested publication counts and private fields are ignored. These public account counts do not verify the inferred subscriber identity.
+
+The public profile-search JSON response has a bounded 16 MB allowance for Substack's large search payloads. Other public responses retain the 5 MB limit; DNS checks, HTTPS requirements, deadlines and candidate-field sanitization remain in place.
+
+CSV imports and confirmed matches update the roster without rescanning every discussion. All three features remain available after an import. Substack's public web endpoints are unofficial and may change or restrict access. Rate limits pause lookups and partial results remain explicit.
 
 ## Collaboration Finder
 
-Collaboration finder and Content opportunities are available only for publications connected through an owner-session subscriber sync. Ordinary public searches and public-list imports show Radar only. Every search and restored publication starts on Radar; owner tools are mounted only when explicitly selected, not loaded invisibly alongside the results.
+Collaboration Finder and Content Opportunities are available for ordinary public searches and CSV imports, as well as legacy saved snapshots. Every search and restored publication starts on Radar; research tools are mounted only when explicitly selected, not loaded invisibly alongside the results.
 
-The Collaboration finder uses the owner's selected publication. It discovers writers among up to 18 active community profiles, scans up to six additional publication domains, and explores up to six profiles found in partner discussions. Requests use the radar's HTTPS/DNS protections, a 90-request budget, bounded concurrency, and a 65-second scheduling deadline. Rate limiting stops additional requests; partial results include warnings.
+The Collaboration finder uses the selected publication as a research reference, not proof of your identity. Outreach sender name and publication URL are separate editable settings and are not taken from another publication you search. It discovers writers among up to 18 active community profiles, scans up to six additional publication domains, and explores up to six profiles found in partner discussions. Requests use the radar's HTTPS/DNS protections, a 90-request budget, bounded concurrency, and a 65-second scheduling deadline. Rate limiting stops additional requests; partial results include warnings.
 
 Matching runs locally without API keys. It fits TF-IDF vectors to publication descriptions, recent titles/subtitles, and optional reader interests. On corpora with 5-100 documents and sufficient vocabulary it uses `ml-matrix` SVD for latent semantic analysis, blended with lexical cosine similarity; larger corpora use lexical cosine to bound browser work. Topic fit, observed relationship activity, audience scale, recency, public reach, and shared public participants contribute to goal-specific scores. Missing counts remain unknown. Maximum marginal relevance diversifies the top 50 results. A regularized ridge regression preference model activates after at least six ratings including both positive and negative examples, with its contribution capped at 20% of the score.
 
@@ -78,7 +90,7 @@ An alternate local Next.js build directory can be selected with `SUBSTACK_DIST_D
 SUBSTACK_DIST_DIR=.next-preview npm run dev -- --port 3001
 ```
 
-Owner direct sync targets port 3000; an alternate preview port does not share browser-local research or planning data.
+CSV import works on the active local port. Browser-local research and planning data is not shared between ports.
 
 ## Legacy Owner Data
 
@@ -101,4 +113,4 @@ The UI uses system fonts and does not download fonts at build time.
 
 ## Deployment Limits
 
-The owner connector and saved roster flow are designed for a trusted, single-user local instance. One-use handoffs and public-count caches live in process memory, saved rosters use local disk, and planning records use browser storage. Do not expose the local owner endpoints as a shared public service without authentication, authorization, and a suitable persistent storage design. A serverless deployment is not a drop-in replacement for these local workflows.
+CSV imports and saved rosters are designed for a trusted, single-user local instance. Public-count caches live in process memory, saved rosters use local disk, and planning records use browser storage. Do not expose roster endpoints as a shared public service without authentication, authorization, and a suitable persistent storage design. A serverless deployment is not a drop-in replacement for these local workflows.

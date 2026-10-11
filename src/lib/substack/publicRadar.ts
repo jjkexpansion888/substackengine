@@ -34,9 +34,15 @@ export function isPublicAddress(address: string): boolean {
   return isIP(address) === 6 && /^[23][0-9a-f]{3}:/i.test(address);
 }
 
+export function publicResponseByteLimit(url: string, accept: string): number {
+  const target = new URL(url);
+  return (accept === "application/json" && target.hostname === "substack.com" && target.pathname === "/api/v1/profile/search" ? 16 : 5) * 1024 * 1024;
+}
+
 async function publicResponse(url: string, accept: string): Promise<Response> {
   for (let redirects = 0; redirects < 4; redirects++) {
     const target = new URL(url);
+    const maxBytes = publicResponseByteLimit(url, accept);
     if (target.protocol !== "https:" || target.port || target.username || target.password) throw new InvalidInputError("Publication must use a public HTTPS address.");
     const addresses = await lookup(target.hostname, { all: true });
     if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) throw new InvalidInputError("Publication must use a public internet address.");
@@ -54,7 +60,7 @@ async function publicResponse(url: string, accept: string): Promise<Response> {
         let bytes = 0;
         incoming.on("data", (chunk: Buffer) => {
           bytes += chunk.length;
-          if (bytes > 5 * 1024 * 1024) request.destroy(new UpstreamChangeError("Public response exceeded the scan limit."));
+          if (bytes > maxBytes) request.destroy(new UpstreamChangeError("Public response exceeded the scan limit."));
           else chunks.push(chunk);
         });
         incoming.on("error", reject);
@@ -162,14 +168,14 @@ export async function discoverPublicRadar(input: string, getJson = publicJson, b
     const id = rawId ?? (handle ? `handle:${handle.toLowerCase()}` : null);
     if (!id) return;
     const member = str(metadata.membership_state);
-    const isSubscriber = evidence === "public_list" || evidence === "browser_list" || evidence === "owner_list" || member === "subscribed" || member === "free_signup";
+    const isSubscriber = evidence === "public_list" || evidence === "browser_list" || evidence === "owner_list" || evidence === "file_list" || member === "subscribed" || member === "free_signup";
     const source = evidence !== "none" ? evidence : isSubscriber ? "comment" : "none";
-    const existing = people.get(id) ?? [...people.values()].find(p => handle && p.handle?.toLowerCase() === handle.toLowerCase());
+    const existing = people.get(id) ?? [...people.values()].find(p => handle && p.handle?.toLowerCase() === handle.toLowerCase() && !(/^\d+$/.test(id) && /^\d+$/.test(p.id) && id !== p.id));
     if (existing) {
       if (role === "Reader" && evidence === "none") existing.comments++;
       if (role === "Author") existing.role = role;
       if (isSubscriber) existing.membership = "Subscriber";
-      if (source === "owner_list" || ((source === "public_list" || source === "browser_list") && existing.subscriberEvidence !== "owner_list") || existing.subscriberEvidence === "none") existing.subscriberEvidence = source;
+      if (source === "owner_list" || source === "file_list" || ((source === "public_list" || source === "browser_list") && existing.subscriberEvidence !== "owner_list") || existing.subscriberEvidence === "none") existing.subscriberEvidence = source;
       if (!existing.handle && handle) { existing.handle = handle; existing.audienceStatus = "unavailable"; }
       if (handle) existing.profileUrl ??= `https://substack.com/@${encodeURIComponent(handle)}`;
       return;
@@ -207,9 +213,9 @@ export async function discoverPublicRadar(input: string, getJson = publicJson, b
   if (authorHandle) subscriberCoverage.profileUrl = `https://substack.com/@${encodeURIComponent(authorHandle)}/subscribers`;
   if (browserImport) {
     const imported = parseSubscriberImport(browserImport);
-    if (imported.version === 2 ? new URL(imported.sourceUrl).hostname !== domain : !authorHandle || subscriberProfileHandle(imported.sourceUrl) !== authorHandle.toLowerCase()) throw new InvalidInputError("This subscriber export belongs to a different creator. Open the matching publication first.");
+    if (imported.version !== 1 ? new URL(imported.sourceUrl).hostname !== domain : !authorHandle || subscriberProfileHandle(imported.sourceUrl) !== authorHandle.toLowerCase()) throw new InvalidInputError("This subscriber export belongs to a different creator. Open the matching publication first.");
     for (const subscriber of imported.subscribers) {
-      addPerson(subscriber, "Reader", imported.version === 2 ? "owner_list" : "browser_list");
+      addPerson(subscriber, "Reader", imported.version === 3 ? "file_list" : imported.version === 2 ? "owner_list" : "browser_list");
       const person = subscriber.id ? people.get(subscriber.id) : undefined;
       if (person && subscriber.publicAudience) {
         person.audience = subscriber.publicAudience.count;
@@ -219,7 +225,13 @@ export async function discoverPublicRadar(input: string, getJson = publicJson, b
       }
     }
     subscriberCoverage.status = "available";
-    subscriberCoverage.source = imported.version === 2 ? "owner_session" : "browser_list";
+    subscriberCoverage.source = imported.version === 3 ? "file_import" : imported.version === 2 ? "owner_session" : "browser_list";
+    if (imported.version === 3) {
+      subscriberCoverage.totalCount = imported.subscribers.length;
+      subscriberCoverage.totalLabel = null;
+      const unresolved = imported.subscribers.filter(row => !row.handle && !/^\d+$/.test(row.id ?? "")).length;
+      if (unresolved) warnings.push(`${unresolved} imported subscribers have no public profile assigned yet.`);
+    }
     if (imported.version === 2) {
       subscriberCoverage.totalCount = imported.totalCount ?? null;
       subscriberCoverage.totalLabel = imported.totalCount?.toLocaleString("en-US") ?? null;

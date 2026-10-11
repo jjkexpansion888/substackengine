@@ -5,14 +5,14 @@ const prefix = "substack-radar:public-import:v1:";
 export function readSubscriberImport(domain: string, storage?: Pick<Storage, "getItem">): SubscriberImport | undefined {
   try {
     const value = storage?.getItem(prefix + domain);
-    if (!value || value.length > 500000) return undefined;
+    if (!value || value.length > 5000000) return undefined;
     const packet = parseSubscriberImport(JSON.parse(value));
-    return packet.version === 1 ? packet : undefined;
+    return packet.version !== 2 ? packet : undefined;
   } catch { return undefined; }
 }
 
 export function saveSubscriberImport(domain: string, packet: SubscriberImport, storage?: Pick<Storage, "setItem">): void {
-  if (packet.version !== 1) return;
+  if (packet.version === 2) return;
   try { storage?.setItem(prefix + domain, JSON.stringify(parseSubscriberImport(packet))); } catch { /* Imports remain usable in memory when browser storage is unavailable. */ }
 }
 

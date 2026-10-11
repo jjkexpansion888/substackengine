@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { radarFeatures } from "./featureAccess";
 
-describe("owner-only research tools", () => {
-  it("shows only Radar before connecting and for public searches or imports", () => {
-    for (const source of [undefined, "comments", "public_list", "browser_list"] as const) expect(radarFeatures(source)).toEqual(["Radar"]);
+describe("extension-free publication research", () => {
+  it("waits for a publication before offering research features", () => {
+    expect(radarFeatures()).toEqual(["Radar"]);
   });
-  it("makes owner tools available without changing the default Radar view", () => {
-    expect(radarFeatures("owner_session")).toEqual(["Radar", "Collaboration finder", "Content opportunities"]);
+  it.each(["comments", "public_list", "browser_list", "owner_session"] as const)("offers all three tools for %s coverage without requiring private sync", source => {
+    expect(radarFeatures(source)).toEqual(["Radar", "Collaboration finder", "Content opportunities"]);
   });
 });

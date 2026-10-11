@@ -1,10 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { discoverPublicRadar, isPublicAddress, publicationDomain } from "./publicRadar";
+import { discoverPublicRadar, isPublicAddress, publicationDomain, publicResponseByteLimit } from "./publicRadar";
 import { PublicAccessRequiredError, RateLimitedError } from "./errors";
+import { parseSubscriberCsv } from "./subscriberCsv";
+import { rankPublicSubscribers } from "./subscriberRanking";
 
 describe("public domain discovery", () => {
+  it("allows larger public profile-search responses without enlarging other response limits", () => {
+    expect(publicResponseByteLimit("https://substack.com/api/v1/profile/search?query=Writer", "application/json")).toBe(16 * 1024 * 1024);
+    for (const url of ["https://substack.com/api/v1/user/writer/public_profile", "https://example.substack.com/api/v1/profile/search", "https://substack.com.evil.example/api/v1/profile/search", "https://substack.com/api/v1/profile/search/other"]) expect(publicResponseByteLimit(url, "application/json")).toBe(5 * 1024 * 1024);
+    expect(publicResponseByteLimit("https://substack.com/api/v1/profile/search", "text/html")).toBe(5 * 1024 * 1024);
+  });
   const archive = [{ id: 1, publication_id: 9, comment_count: 1, publishedBylines: [{ id: 100, handle: "writer", publicationUsers: [{ publication: { id: 9, primary_user_id: 100, name: "Example" } }] }] }];
   const author = { id: 100, handle: "writer" };
+  it("imports CSV accounts and unresolved readers, verifies counts and binds the publication", async () => {
+    const packet = parseSubscriberCsv("Name,Email,Handle\nSmall,s@example.test,csvsmall\nLarge,l@example.test,csvlarge\nUnresolved,u@example.test,", "example.substack.com").packet;
+    const getJson = async (url: string) => {
+      if (url.includes("archive")) return archive;
+      if (url.includes("comments")) return { comments: [] };
+      if (url.includes("/writer/")) return author;
+      if (url.includes("/csvsmall/")) return { handle: "csvsmall", subscriberCountNumber: 50 };
+      if (url.includes("/csvlarge/")) return { handle: "csvlarge", subscriberCountNumber: 5000 };
+      return {};
+    };
+    const radar = await discoverPublicRadar("example", getJson, packet);
+    expect(radar.subscriberCoverage).toMatchObject({ source: "file_import", discovered: 3, totalCount: 3, enriched: 2 });
+    expect(rankPublicSubscribers(radar.people).map(p => [p.name, p.audience, p.subscriberEvidence])).toEqual([["Large", 5000, "file_list"], ["Small", 50, "file_list"], ["Unresolved", null, "file_list"]]);
+    await expect(discoverPublicRadar("example", getJson, { ...packet, sourceUrl: "https://other.substack.com/publish/subscribers" })).rejects.toThrow("different creator");
+  });
   it("paginates up to 50 posts and discovers readers from older discussions", async () => {
     const urls: string[] = [];
     const radar = await discoverPublicRadar("example", async url => {
@@ -14,7 +36,7 @@ describe("public domain discovery", () => {
         return Array.from({ length: 25 }, (_, i) => ({ id: offset + i + 1, title: `Post ${offset + i + 1}`, comment_count: offset + i === 49 ? 1 : 0 }));
       }
       if (url.includes("/post/50/comments")) return { comments: [{ user_id: 99, handle: "olderreader", metadata: { membership_state: "subscribed" } }] };
-      if (url.includes("public_profile")) return { subscriberCountNumber: 589 };
+      if (url.includes("public_profile")) return { id: 99, handle: "olderreader", subscriberCountNumber: 589 };
       return {};
     });
     expect(radar.postsScanned).toBe(50);
@@ -98,7 +120,7 @@ describe("public domain discovery", () => {
       if (url.includes("/100/")) return author;
       if (url.includes("comments")) return { comments: [] };
       if (url.includes("subscriber-lists")) throw new Error("Should not request the list on import");
-      return { subscriberCountNumber: 2000 };
+      return { handle: url.includes("/writer/") ? "writer" : "reader", subscriberCountNumber: 2000 };
     };
     const packet = { version: 1 as const, capturedAt: "2026-10-11T12:00:00Z", sourceUrl: "https://substack.com/@writer/subscribers", subscribers: [{ handle: "reader", name: "Reader" }] };
     const radar = await discoverPublicRadar("example", getJson, packet);
@@ -143,7 +165,7 @@ describe("public domain discovery", () => {
       urls.push(url);
       if (url.includes("archive")) return [{ id: 1, publication_id: 9, title: "Post", comment_count: 2, publishedBylines: [{ id: 100, name: "Author", handle: "author", publicationUsers: [{ publication: { id: 9, name: "Example" } }] }] }];
       if (url.includes("comments")) return { comments: [{ user_id: 1, name: "Reader", handle: "reader", metadata: { membership_state: "subscribed" }, children: [{ user_id: 1, name: "Reader", handle: "reader" }, { user_id: 2, name: "Unknown", handle: "unknown" }] }, { user_id: 3, name: "Deleted", deleted: true }] };
-      if (url.includes("/reader/")) return { subscriberCountNumber: 1200, subscriberCount: "1.2K+" };
+      if (url.includes("/reader/")) return { id: 1, handle: "reader", subscriberCountNumber: 1200, subscriberCount: "1.2K+" };
       return {};
     });
     expect(result.name).toBe("Example");

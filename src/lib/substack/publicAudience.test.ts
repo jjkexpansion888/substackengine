@@ -6,6 +6,10 @@ import type { PublicPerson } from "./publicRadar";
 
 const page = (profile: unknown) => `<script>window._preloads = JSON.parse(${JSON.stringify(JSON.stringify({ profile, recommendations: [{ subscriberCountNumber: 999999 }] }))})</script>`;
 describe("public audience recovery", () => {
+  it("does not accept an ID-less count for an imported numeric identity", async () => {
+    const result = await lookupPublicAudience({ id: "123", handle: "reader" }, async () => ({ handle: "reader", subscriberCountNumber: 999999 }));
+    expect(result.audience).toBeNull();
+  });
   it("parses numeric and rounded count labels without confusing followers", () => {
     expect(audienceFromProfile({ subscriberCount: "1.2K+", followerCount: 99000 }).audience).toBe(1200);
     expect(audienceFromProfile({ subscriberCountString: "2,500 subscribers" }).audience).toBe(2500);
@@ -25,8 +29,9 @@ describe("public audience recovery", () => {
     expect(await lookupPublicAudience({ handle: "actual" }, async () => ({}), async () => page({ handle: "actual", subscriberCount: "3.8K+" }))).toMatchObject({ audience: 3800, status: "public" });
     expect(() => profileFromPage(page({ handle: "other", subscriberCountNumber: 100 }), { handle: "actual" })).toThrow("identity");
   });
-  it("recovers renamed handles using the API's verified public numeric ID", async () => {
-    expect(await lookupPublicAudience({ handle: "oldhandle" }, async () => ({ id: 42, handle: "newhandle" }), async () => page({ id: 42, handle: "newhandle", subscriberCountNumber: 589 }))).toMatchObject({ audience: 589, handle: "newhandle" });
+  it("requires an exact account identity before accepting a renamed handle or count", async () => {
+    expect(await lookupPublicAudience({ id: "42", handle: "oldhandle" }, async () => ({ id: 42, handle: "newhandle" }), async () => page({ id: 42, handle: "newhandle", subscriberCountNumber: 589 }))).toMatchObject({ audience: 589, handle: "newhandle" });
+    await expect(lookupPublicAudience({ handle: "oldhandle" }, async () => ({ id: 42, handle: "newhandle", subscriberCountNumber: 999999 }))).rejects.toThrow("identity");
     await expect(lookupPublicAudience({ handle: "oldhandle" }, async () => ({ id: 42 }), async () => page({ id: 43, handle: "different", subscriberCountNumber: 999999 }))).rejects.toThrow("identity");
   });
   it("distinguishes one blocked page from a blocked public profile API", async () => {

@@ -5,6 +5,11 @@ import type { PublicPerson } from "./publicRadar";
 const person = (id: string, overrides: Partial<PublicPerson> = {}): PublicPerson => ({ id, name: id, handle: id, photoUrl: null, role: "Reader", membership: "Subscriber", subscriberEvidence: "browser_list", comments: 0, audience: null, audienceLabel: null, audienceStatus: "unavailable", profileUrl: null, publicationName: null, bestseller: false, ...overrides });
 
 describe("automatic audience lookup queue", () => {
+  it("never merges a matching handle with a different numeric account ID", () => {
+    const original = person("123", { handle: "reader" });
+    expect(mergeAudienceResults([original], [{ id: "456", handle: "reader", audience: 999999, status: "public" }])).toEqual([original]);
+    expect(mergeAudienceResults([original], [{ handle: "reader", audience: 999999, status: "public" }])).toEqual([original]);
+  });
   it("continues past the first batch and does not starve later unknown profiles", () => {
     const people = Array.from({ length: 143 }, (_, i) => person(`reader${i}`));
     const attempted = new Set<string>();
