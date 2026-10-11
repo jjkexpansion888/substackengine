@@ -1,0 +1,10 @@
+# Obvious repo policy.
+# Generated 2026-09-17 by the onboarding worker (empty-repository scaffold path).
+# Defaults auto-detected from GitHub repo settings: default branch "main";
+# all merge methods allowed, squash selected as default.
+version: 1
+branches:
+  default: main
+merge:
+  method: squash
+  requireHumanMerge: true

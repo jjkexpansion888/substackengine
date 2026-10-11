@@ -13,7 +13,7 @@ Public searches open Radar only. Collaboration Finder and Content Opportunities 
 
 ## Getting Started
 
-The public radar does not require a cookie, encryption key, or database. Install dependencies and run the development server:
+The public radar does not require a cookie, encryption key, or database. Installing dependencies also generates the Prisma client for the optional legacy routes. Run the development server:
 
 ```bash
 npm install
@@ -94,6 +94,8 @@ Paste the generated key into `.env`, configure a development Postgres database, 
 ```bash
 npx prisma migrate dev
 ```
+
+For a disposable development database, `npm run db:push` is also available. `npm run db:generate` regenerates the Prisma client. If a legacy route reports `PrismaClientInitializationError`, check the terminal log and verify that `DATABASE_URL` is configured and reachable; restart the server after changing it.
 
 The UI uses system fonts and does not download fonts at build time.
 
