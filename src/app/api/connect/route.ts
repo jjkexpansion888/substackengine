@@ -1,47 +1,15 @@
-import { createSubstackClient } from "@/lib/substack";
-import { normalizeDomain } from "@/lib/substack/types";
+import { discoverPublicRadar } from "@/lib/substack/publicRadar";
 import { jsonError } from "@/lib/api/errorMapping";
-import { prisma } from "@/lib/db/prisma";
-import { createSecretBox, loadEncryptionKey } from "@/lib/crypto/secretBox";
-import { upsertPublication } from "@/lib/store/prismaStore";
+import { parseSubscriberImport } from "@/lib/substack/subscriberRanking";
 
-/**
- * POST /api/connect — store a publication's owner session cookie, encrypted.
- *
- * Body: { domain: string, cookie: string } (the substack.sid value).
- * The cookie is validated against the live publication before anything is
- * persisted; on success it is stored AES-256-GCM encrypted, never plaintext.
- */
+export const maxDuration = 120;
+
 export async function POST(request: Request): Promise<Response> {
+  let body: { domain?: unknown; subscriberImport?: unknown };
+  try { body = await request.json(); } catch { return Response.json({ error: { code: "invalid_input", message: "Enter a publication domain." } }, { status: 400 }); }
+  if (!body || typeof body.domain !== "string") return Response.json({ error: { code: "invalid_input", message: "Enter a publication domain." } }, { status: 400 });
   try {
-    const body = (await request.json()) as { domain?: unknown; cookie?: unknown };
-    if (typeof body.domain !== "string" || typeof body.cookie !== "string") {
-      return Response.json(
-        { error: { code: "invalid_input", message: "domain and cookie are required" } },
-        { status: 400 },
-      );
-    }
-    const domain = normalizeDomain(body.domain);
-    const client = createSubstackClient({ domain });
-    const session = await client.validateSession(body.cookie);
-
-    const secretBox = createSecretBox(loadEncryptionKey(process.env.COOKIE_ENCRYPTION_KEY));
-    const publication = await upsertPublication(
-      { prisma, secretBox },
-      { domain, session, cookie: body.cookie },
-    );
-
-    return Response.json(
-      {
-        publication: {
-          id: publication.id,
-          subdomain: publication.subdomain,
-          displayName: publication.displayName,
-        },
-      },
-      { status: 201 },
-    );
-  } catch (error) {
-    return jsonError(error);
-  }
+    const subscriberImport = body.subscriberImport === undefined ? undefined : parseSubscriberImport(body.subscriberImport);
+    return Response.json({ radar: await discoverPublicRadar(body.domain, undefined, subscriberImport) });
+  } catch (error) { return jsonError(error); }
 }

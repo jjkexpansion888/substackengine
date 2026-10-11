@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Substack Engine: Subscriber Connector",
+  "version": "0.4.2",
+  "description": "Read subscribers using your active publication's browser session, without copying cookies.",
+  "permissions": ["activeTab", "scripting"],
+  "optional_host_permissions": ["http://localhost:3000/*", "https://substack.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Connect Substack subscribers"
+  }
+}

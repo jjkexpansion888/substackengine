@@ -1,0 +1,57 @@
+.root { margin-top: 28px; }
+.heading, .briefHeading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.heading h2 { font-size: 22px; margin: 0; }
+.heading h3 { font-size: 19px; margin: 0; }
+.heading p, .note, .footer { color: #77818a; font-size: 12px; line-height: 1.65; }
+.preferences { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; padding: 24px 0; }
+.root label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: #56636a; font-weight: 600; min-width: 0; }
+.root input, .root textarea, .root select { border: 1px solid #d5dde1; border-radius: 4px; padding: 10px; background: white; color: #303b42; font-family: inherit; font-size: 12px; line-height: 1.5; min-width: 0; }
+.root textarea { width: 100%; font-size: 13px; line-height: 1.65; resize: vertical; }
+.tabs { display: flex; gap: 22px; align-items: center; border-top: 1px solid #dce3e7; border-bottom: 1px solid #dce3e7; }
+.tabs button[role=tab] { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 16px 0; border-bottom: 2px solid transparent; color: #77818a; }
+.tabs button[aria-selected=true] { color: #26705b; border-bottom-color: #26705b; }
+.tabs > button:last-child { margin-left: auto; }
+.tabs span { font-size: 11px; }
+.toolbar { display: flex; gap: 12px; margin: 20px 0; }
+.toolbar > div { flex: 1; }
+.toolbar input { border: none; padding: 0; background: none; }
+.table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; table-layout: fixed; }
+.table th { color: #7a858d; font-weight: 500; padding: 12px; border-bottom: 1px solid #dce3e7; }
+.table td { padding: 16px 12px; border-bottom: 1px solid #e1e6e8; vertical-align: top; overflow-wrap: anywhere; }
+.table th:first-child { width: 44%; }
+.table th:nth-child(2) { width: 10%; }
+.table th:nth-child(3) { width: 23%; }
+.table th:nth-child(4) { width: 16%; }
+.table th:last-child { width: 7%; }
+.ideaTitle { text-align: left; color: #283d36; font-size: 13px; line-height: 1.55; font-weight: 600; overflow-wrap: anywhere; }
+.ideaTitle:hover { color: #26705b; text-decoration: underline; }
+.table small { display: block; color: #7a858d; font-size: 11px; margin-top: 5px; }
+.score { font-weight: 700; color: #26705b; }
+.empty { text-align: center; padding: 40px 0; color: #7a858d; }
+.empty h3 { font-size: 15px; }
+.detail { border-top: 1px solid #cdd7db; margin-top: 28px; padding: 24px 0; }
+.detailGrid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 32px; margin-top: 20px; }
+.root h4 { font-size: 13px; margin: 20px 0 10px; }
+.detailGrid aside { min-width: 0; font-size: 12px; line-height: 1.65; }
+.detailGrid a { color: #26705b; overflow-wrap: anywhere; }
+.detailGrid a svg { display: inline; margin-left: 4px; }
+.detailGrid blockquote { margin: 14px 0; border-left: 2px solid #a7bfb5; padding: 0 0 0 14px; }
+.detailGrid blockquote p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.source { border-bottom: 1px solid #dce3e7; padding: 12px 0; }
+.source small { color: #77818a; }
+.source p { margin: 6px 0; }
+.schedule { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin-top: 16px; }
+.calendarRow { display: grid; grid-template-columns: minmax(0, 1fr) 150px 110px 36px; gap: 16px; padding: 18px 0; align-items: center; border-bottom: 1px solid #dce3e7; }
+.footer { border-top: 1px solid #dce3e7; padding-top: 18px; margin-top: 24px; }
+.notice { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #56636a; padding: 10px 0; }
+.notice > button:last-child { margin-left: auto; }
+.root textarea:focus-visible { outline: 3px solid #a6c7bd; outline-offset: 3px; }
+@media (max-width: 700px) {
+  .heading { align-items: start; flex-wrap: wrap; }
+  .preferences, .detailGrid { grid-template-columns: 1fr; gap: 18px; }
+  .table { min-width: 660px; }
+  .toolbar { flex-wrap: wrap; }
+  .toolbar > div { flex-basis: 100%; }
+  .calendarRow { grid-template-columns: minmax(0, 1fr) 110px 36px; gap: 10px; }
+  .calendarRow > button:first-child { grid-column: 1 / -1; }
+}

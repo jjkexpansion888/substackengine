@@ -28,3 +28,9 @@ export class UpstreamChangeError extends SubstackError {}
 
 /** Bad caller input (malformed domain, empty cookie). Maps to a 400. */
 export class InvalidInputError extends SubstackError {}
+
+/** A public endpoint requires a normal browser session or verification. */
+export class PublicAccessRequiredError extends SubstackError {}
+
+/** The profile API worked, but this particular profile's page needs browser access. */
+export class ProfileAccessRequiredError extends PublicAccessRequiredError {}
