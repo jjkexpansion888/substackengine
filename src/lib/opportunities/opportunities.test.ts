@@ -36,6 +36,22 @@ describe("content opportunity ranking", () => {
   });
 });
 describe("public discussion discovery", () => {
+  it("researches recommendation-network articles independently of subscriber accounts", async () => {
+    const requested: string[] = [];
+    const result = await discoverOpportunities({ domain: "research.substack.com" }, async url => {
+      requested.push(url);
+      const host = new URL(url).hostname;
+      return [{ id: 1, title: host === "research.substack.com" ? "Culture philosophy and institutions" : "New philosophical research", canonical_url: `https://${host}/p/research`, comment_count: 0 }];
+    }, async () => `<a href="https://newvoice.substack.com/?utm_source=recommendations_page&amp;utm_campaign=1">New Voice</a>`);
+    expect(requested.some(url => url.includes("newvoice.substack.com/api/v1/archive"))).toBe(true);
+    expect(result.external?.some(article => article.domain === "newvoice.substack.com")).toBe(true);
+    expect(result.publicationsScanned).toBeGreaterThan(2);
+  });
+  it("preserves topic-source research when recommendation pages are unavailable", async () => {
+    const result = await discoverOpportunities({ domain: "research.substack.com" }, async url => [{ id: 1, title: "Culture philosophy and institutions", canonical_url: `https://${new URL(url).hostname}/p/research`, comment_count: 0 }], async () => { throw new Error("Unavailable"); });
+    expect(result.external!.length).toBeGreaterThan(0);
+    expect(result.warnings.join(" ")).toContain("recommendation pages were unavailable");
+  });
   it("extracts questions, skips deleted and author comments, and rejects unsafe links", async () => {
     const getJson = async (url: string) => url.includes("archive") ? [{ id: 1, title: "Risk", comment_count: 10, publishedBylines: [{ id: 55 }], canonical_url: "javascript:alert(1)" }] : { comments: [
       { id: 1, user_id: 8, body: "<p>How do hedges affect <b>returns</b>?</p>", children: [{ id: 2, user_id: 9, body: "Could you explain option pricing?" }] },

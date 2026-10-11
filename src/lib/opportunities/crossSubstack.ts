@@ -50,7 +50,7 @@ export function suggestedSources(posts: OpportunityPost[], focus: string): strin
 const norm = (v: number[]) => { const n = Math.hypot(...v); return v.map(x => n ? x / n : 0); };
 const cosine = (a: number[], b: number[]) => Math.max(0, Math.min(1, a.reduce((s, x, i) => s + x * (b[i] ?? 0), 0)));
 export function crossSubstackIdeas(scan: OpportunityScan, focus: string): { opportunities: ContentOpportunity[]; method: string } {
-  const external = (scan.external ?? []).filter(p => p.domain !== scan.domain && p.url).slice(0, 128);
+  const external = (scan.external ?? []).filter(p => p.domain !== scan.domain && p.url).slice(0, 192);
   if (!external.length || !scan.posts.length) return { opportunities: [], method: "Cross-publication scan pending" };
   type Angle = { title: string; keywords: string; premise: string; theme: Theme; anchor?: ExternalArticle; entity?: string; key: string };
   const angles: Angle[] = topicThemes.flatMap(t => t.angles.map(([title, keywords, premise], i) => ({ title, keywords, premise, theme: t, key: `${t.id}:${i}` })));

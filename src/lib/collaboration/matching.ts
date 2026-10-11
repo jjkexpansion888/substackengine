@@ -26,7 +26,7 @@ export function rankCollaborators(sourceText: string, candidates: CollaborationC
   let vectors = rows;
   let method = "TF-IDF cosine";
   // Reduce the corpus into shared latent topics; keep lexical similarity to avoid small-corpus artifacts.
-  if (docs.length >= 5 && docs.length <= 100 && vocabulary.length >= 8) {
+  if (docs.length >= 5 && docs.length <= 250 && vocabulary.length >= 8) {
     const svd = new SingularValueDecomposition(new Matrix(rows), { autoTranspose: true });
     const dimensions = Math.min(12, Math.max(2, Math.floor(docs.length / 2)), svd.diagonal.filter(s => s > 1e-8).length);
     if (dimensions >= 2) {

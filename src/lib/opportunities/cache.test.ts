@@ -12,6 +12,6 @@ describe("public opportunity research cache", () => {
     const parsed = readOpportunityCache({ ...scan, posts: [{ ...p, url: "javascript:alert(1)", text: "x".repeat(8000) }], external: Array.from({ length: 200 }, () => ({ ...p, domain: "outside.substack.com" })) }, scan.domain)!;
     expect(parsed.posts[0].url).toBeNull();
     expect(parsed.posts[0].text).toHaveLength(6000);
-    expect(parsed.external).toHaveLength(128);
+    expect(parsed.external).toHaveLength(192);
   });
 });

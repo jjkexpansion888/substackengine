@@ -3,6 +3,21 @@ import { discoverCollaborators, parseDiscoveryInput } from "./discovery";
 import { RateLimitedError } from "@/lib/substack/errors";
 
 describe("collaboration discovery", () => {
+  it("discovers outside publications without a subscriber roster", async () => {
+    const scan = await discoverCollaborators({ domain: "garden.substack.com", people: [], seeds: [], writing: "culture philosophy literature education university institutions" }, async url => {
+      if (url.includes("public_profile")) return { name: "Outside writer", handle: "outside" };
+      return [{ id: 1, title: "Literature and institutions", comment_count: 0, publishedBylines: [{ name: "Outside writer", handle: "outside" }] }];
+    });
+    expect(scan.candidates.length).toBeGreaterThan(0);
+    expect(scan.candidates.every(candidate => candidate.source === "extended")).toBe(true);
+    expect(scan.candidates[0].evidence.join(" ")).toContain("semantic alignment");
+  });
+  it("skips previously discovered publications", async () => {
+    const requests: string[] = [];
+    const scan = await discoverCollaborators({ domain: "garden.substack.com", people: [{ handle: "sam", comments: 1, author: false, domain: "other.substack.com" }], seeds: [], excludeDomains: ["other.substack.com"] }, async url => { requests.push(url); return []; });
+    expect(requests).toEqual([]);
+    expect(scan.candidates).toEqual([]);
+  });
   it("validates and bounds untrusted input", () => {
     expect(() => parseDiscoveryInput({ domain: "127.0.0.1", people: [], seeds: [] })).toThrow();
     expect(() => parseDiscoveryInput({ domain: "garden.substack.com", people: [{ handle: "../admin", comments: 0, author: false }], seeds: [] })).toThrow();

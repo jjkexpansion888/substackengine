@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Bookmark, Check, Copy, Download, Handshake, LoaderCircle, Search, SlidersHorizontal, ThumbsDown, ThumbsUp, Trash2, Undo2, Upload, X } from "lucide-react";
+import { ArrowUpRight, Bookmark, Check, Copy, Download, Handshake, LoaderCircle, Search, ThumbsDown, ThumbsUp, Trash2, Undo2, Upload, X } from "lucide-react";
 import type { PublicRadar } from "@/lib/substack/publicRadar";
 import { campaignLink, collaborationIdeas, resolveOutreachDraft, rankCollaborators } from "@/lib/collaboration/matching";
-import type { CollaborationCandidate, CollaborationFormat, CollaborationGoal, CollaborationMatch, CollaborationRecord, CollaborationScan, CollaborationStage } from "@/lib/collaboration/types";
+import type { CollaborationCandidate, CollaborationFormat, CollaborationRecord, CollaborationScan, CollaborationStage } from "@/lib/collaboration/types";
 import styles from "./CollaborationFinder.module.css";
 import { parseCollaborationBackup } from "@/lib/collaboration/backup";
 
@@ -26,14 +26,13 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [seeds, setSeeds] = useState("");
-  const [context, setContext] = useState("");
-  const [senderName, setSenderName] = useState("Baekho Research");
-  const [senderUrl, setSenderUrl] = useState("https://whitetigercapital.substack.com/");
-  const [audience, setAudience] = useState(radar.subscriberCoverage.totalCount?.toString() ?? "");
-  const [goal, setGoal] = useState<CollaborationGoal>("balanced");
-  const [diversity, setDiversity] = useState(true);
-  const [settings, setSettings] = useState(true);
+  const senderName = radar.name;
+  const senderUrl = `https://${radar.domain}/`;
+  const audience = radar.subscriberCoverage.totalCount?.toString() ?? "";
+  const context = "";
+  const seeds = "";
+  const goal = "balanced" as const;
+  const diversity = true;
   const [view, setView] = useState("Discover");
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("all");
@@ -48,14 +47,10 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
 
   useEffect(() => {
     try {
-      const sender = localStorage.getItem("substack-collaborations:sender:v1");
-      if (sender !== null) setSenderName(sender.slice(0, 300));
-      const senderAddress = localStorage.getItem("substack-collaborations:sender-url:v1");
-      if (senderAddress !== null) setSenderUrl(senderAddress.slice(0, 4000));
       const saved = localStorage.getItem(key);
       if (saved) {
         const data = parseCollaborationBackup(JSON.parse(saved), radar.domain, false);
-        setRecords(data.records); setScan(data.scan); setContext(data.context); setAudience(data.audience); setSeeds(data.seeds); setGoal(data.goal); setDiversity(data.diversity);
+        setRecords(data.records); setScan(data.scan);
       }
     } catch { setError("Saved collaboration data could not be loaded. New changes will be kept in this session."); }
     setLoaded(true);
@@ -63,8 +58,6 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
   useEffect(() => {
     if (!loaded) return;
     try {
-      localStorage.setItem("substack-collaborations:sender:v1", senderName);
-      localStorage.setItem("substack-collaborations:sender-url:v1", senderUrl);
       localStorage.setItem(key, JSON.stringify({ version: 1, domain: radar.domain, records, scan, context, audience, seeds, goal, diversity, senderName, senderUrl }));
     }
     catch { setError("Browser storage is unavailable or full. Export your pipeline to retain these changes."); }
@@ -113,12 +106,12 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/collaborations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-        domain: radar.domain, seeds: seeds.split(/[\n,]/).map(s => s.trim()).filter(Boolean),
+        domain: radar.domain, seeds: [], writing: `${radar.description ?? ""} ${radar.posts.map(post => post.title).join(" ")}`.slice(0, 30000), excludeDomains: candidates.map(candidate => candidate.domain).slice(0, 500),
         people: radar.people.filter(p => p.handle).slice(0, 1000).map(p => ({ handle: p.handle, comments: p.comments, author: p.role === "Author", domain: p.publicationDomain, name: p.name, publication: p.publicationName, description: p.publicationDescription, audience: p.audience, audienceLabel: p.audienceLabel, photoUrl: p.photoUrl })),
       }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? "Collaboration discovery failed.");
-      setScan(current => !body.candidates.length && current?.candidates.length ? { ...current, requests: body.requests, warnings: [...body.warnings, "No fresh candidates were available. Keeping your previous research."] } : body);
+      setScan(current => ({ ...body, candidates: [...new Map([...(current?.candidates ?? []), ...body.candidates].map((candidate: CollaborationCandidate) => [candidate.id, candidate])).values()].slice(0, 500) }));
       setView("Discover");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not discover collaborators."); }
     finally { setBusy(false); }
@@ -134,9 +127,6 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
       const data = parseCollaborationBackup(JSON.parse(await file.text()), radar.domain);
       setRecords(current => ({ ...data.records, ...current }));
       if (data.scan) setScan(data.scan);
-      setContext(data.context); setAudience(data.audience); setSeeds(data.seeds); setGoal(data.goal); setDiversity(data.diversity);
-      if (data.senderName !== null) setSenderName(data.senderName);
-      if (data.senderUrl !== null) setSenderUrl(data.senderUrl);
       setSelected(null); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not restore this backup."); }
     finally { if (backupInput.current) backupInput.current.value = ""; }
@@ -151,17 +141,7 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
   };
 
   return <section className={styles.finder} aria-label="Collaboration finder">
-    <div className={styles.heading}><div><h2>Collaboration finder</h2><p>{scan ? `${scan.candidates.length} writers discovered · ${pipeline.length} in your pipeline` : "Your next creative partnership"}</p></div><div className={styles.actions}><button className="icon-button" aria-label="Matching preferences" title="Matching preferences" aria-expanded={settings} onClick={() => setSettings(!settings)}><SlidersHorizontal size={17} /></button><button className="primary-button" disabled={busy || !loaded} onClick={() => void discover()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Handshake size={16} />}{busy ? "Discovering..." : scan ? "Refresh matches" : "Find collaborators"}</button></div></div>
-    {settings && <div className={styles.preferences}>
-      <label>Your publication name<input maxLength={300} placeholder="Publication you write" value={senderName} onChange={e => { setSenderName(e.target.value); setCopied(""); }} /></label>
-      <label>Your publication URL<input type="url" maxLength={4000} placeholder="https://your-publication.substack.com" value={senderUrl} onChange={e => { setSenderUrl(e.target.value); setCopied(""); }} /></label>
-      <label>Research publication<input value={radar.name} readOnly /></label>
-      <label>Additional publications<textarea rows={2} placeholder="publication.substack.com, another.substack.com" value={seeds} onChange={e => setSeeds(e.target.value)} /></label>
-      <label>Topics and reader interests<textarea rows={2} placeholder="Topics you cover and who you write for" value={context} onChange={e => setContext(e.target.value)} /></label>
-      <label>Reference subscriber count<input type="number" min="0" step="1" placeholder="Unknown" value={audience} onChange={e => setAudience(e.target.value)} /></label>
-      <label>Partnership goal<select value={goal} onChange={e => setGoal(e.target.value as CollaborationGoal)}><option value="balanced">Balanced fit</option><option value="reach">Expand reach</option><option value="relationship">Warm relationships</option></select></label>
-      <label className={styles.check}><input type="checkbox" checked={diversity} onChange={e => setDiversity(e.target.checked)} />Diversify the shortlist</label>
-    </div>}
+    <div className={styles.heading}><div><h2>Collaboration finder</h2><p>{senderName}{scan ? ` · ${scan.candidates.length} writers · ${pipeline.length} in your pipeline` : ""}</p></div><div className={styles.actions}><button className="primary-button" disabled={busy || !loaded} onClick={() => void discover()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Handshake size={16} />}{busy ? "Discovering..." : scan ? "Find more collaborators" : "Find collaborators"}</button></div></div>
     {error && <p className="error-message" role="alert">{error}</p>}
     {removed && <div className={styles.modelLine} role="status"><span>{removed.candidate.name} removed from research.</span><button className="secondary-button" onClick={undoRemoval}><Undo2 size={15} />Undo</button></div>}
     {busy && <p className="form-feedback" role="status">Checking writer profiles, recent posts, and shared public discussions. This may take about a minute.</p>}
@@ -176,7 +156,7 @@ export function CollaborationFinder({ radar }: { radar: PublicRadar }) {
       <div className={styles.results}><div className="table-scroll"><table className={`people-table ${styles.matches}`}><caption className="sr-only">Potential collaborators ranked by fit</caption><thead><tr><th>Writer / publication</th><th>Fit</th><th>Public audience</th><th>Shared participants</th><th>Stage</th><th><span className="sr-only">Save</span></th></tr></thead><tbody>{matches.map(m => <tr key={m.id} className={m.id === selected ? styles.selected : ""}><td><div className="person-cell"><span className="avatar">{m.photoUrl ?
         // eslint-disable-next-line @next/next/no-img-element
         <img src={m.photoUrl} alt="" onError={e => { e.currentTarget.style.display = "none"; }} /> : m.name.slice(0, 2).toUpperCase()}</span><div><button className={styles.textButton} onClick={() => { setSelected(m.id); setCopied(""); }}>{m.name}</button><small>{m.publication}</small></div></div></td><td><strong className={styles.score}>{m.score}</strong><small className={styles.confidence}>{m.confidence} evidence</small></td><td>{m.audienceLabel ?? number(m.audience)}</td><td>{m.sampledParticipants ? `${m.sharedParticipants} / ${m.sampledParticipants}` : "No sample"}</td><td><span className="relationship">{records[m.id]?.stage ?? "new"}</span>{records[m.id]?.followUp && records[m.id].followUp <= new Date().toLocaleDateString("en-CA") && !["completed", "dismissed"].includes(records[m.id].stage) && <small className={styles.due}>Follow-up due</small>}</td><td><button className="icon-button" title={`Save ${m.name}`} aria-label={`Save ${m.name}`} disabled={!!records[m.id] && !["new", "dismissed"].includes(records[m.id].stage)} onClick={() => update(m, { stage: "saved", feedback: "positive" })}><Bookmark size={16} /></button></td></tr>)}</tbody></table></div></div>
-      {!matches.length && <div className="empty-results"><Handshake size={28} /><h3>{busy ? "Looking for potential partners" : scan ? "No matches in this view" : "Ready to meet your next collaborator"}</h3><p>{scan ? "Adjust your filters or add publications to broaden discovery." : ""}</p></div>}
+      {!matches.length && <div className="empty-results"><Handshake size={28} /><h3>{busy ? "Looking for potential partners" : scan ? "No matches in this view" : "Ready to meet your next collaborator"}</h3>{scan && <p>No writers match the current filters.</p>}</div>}
       <div className={styles.modelLine}><span>{ranking.method}{diversity ? " · diversity reranking" : ""}</span><span>{ranking.personalized ? "Preference model active" : `${feedbackCount} preference ratings · learns after 6 mixed ratings`}</span></div>
     </>}
     {active && activeRecord && <section ref={detail} className={styles.detail} aria-label={`Collaboration with ${active.name}`}>

@@ -268,7 +268,7 @@ export function ConnectForm() {
         {phase.kind === "error" && <p role="alert" className="error-message">{phase.message}</p>}
         {saveStatus === "error" && <p role="alert" className="error-message">Could not save your results locally. Keep this page open and try Refresh.</p>}
         {audienceQueue === "running" && <p role="status" className="form-feedback"><LoaderCircle size={15} className="spin" /> Looking up remaining subscriber counts...</p>}
-        {audienceQueue === "paused" && <div className="form-feedback" role="status">Count lookups paused. Substack may require browser access or a cooldown. <button className="secondary-button" onClick={() => { if (!pendingAudienceProfiles(radar.people, audienceAttempts.current).length) audienceAttempts.current.clear(); setAudienceQueue("idle"); setRadar(current => current ? { ...current } : current); }}><RefreshCw size={15} />Retry counts</button></div>}
+        {feature === "Radar" && audienceQueue === "paused" && <div className="form-feedback" role="status">Count lookups paused. Substack may require browser access or a cooldown. <button className="secondary-button" onClick={() => { if (!pendingAudienceProfiles(radar.people, audienceAttempts.current).length) audienceAttempts.current.clear(); setAudienceQueue("idle"); setRadar(current => current ? { ...current } : current); }}><RefreshCw size={15} />Retry counts</button></div>}
         {phase.kind === "connecting" && <p role="status" className="form-feedback">Refreshing public activity. Your previous results remain available.</p>}
         {returningToSearch && <p role="status" className="form-feedback">Saving results...</p>}
         {feature === "Collaboration finder" && <CollaborationFinder key={radar.domain} radar={radar} />}

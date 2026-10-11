@@ -12,7 +12,7 @@ export function readOpportunityCache(value: unknown, expectedDomain: string): Op
   const s = object(value);
   if (s.domain !== expectedDomain || !Array.isArray(s.posts) || !Array.isArray(s.questions) || !Array.isArray(s.external) || typeof s.scannedAt !== "string" || !Number.isFinite(Date.parse(s.scannedAt))) return null;
   const posts = s.posts.slice(0, 48).flatMap(p => { const parsed = post(p); return parsed ? [parsed] : []; });
-  const external: ExternalArticle[] = s.external.slice(0, 128).flatMap(value => {
+  const external: ExternalArticle[] = s.external.slice(0, 192).flatMap(value => {
     const p = post(value), e = object(value), domain = text(e.domain, 300);
     return p && p.url && /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain) && domain !== expectedDomain ? [{ ...p, domain, publication: text(e.publication, 300) || domain }] : [];
   });

@@ -1,9 +1,11 @@
-import { publicationDomain, publicJson } from "@/lib/substack/publicRadar";
+import { publicationDomain, publicJson, publicPage } from "@/lib/substack/publicRadar";
 import { InvalidInputError, RateLimitedError, UpstreamChangeError, UpstreamTransientError } from "@/lib/substack/errors";
 import { pooledMap } from "@/lib/substack/concurrency";
 import type { ExternalArticle, OpportunityPost, OpportunityScan, ReaderQuestion } from "./types";
 import { articleText, suggestedSources } from "./crossSubstack";
 import { tokens } from "@/lib/collaboration/matching";
+import { topicDiscoverySources } from "@/lib/collaboration/topicDiscovery";
+import { recommendedDomains } from "./recommendations";
 
 const obj = (v: unknown): Record<string, unknown> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 const text = (v: unknown) => typeof v === "string" ? v : "";
@@ -17,7 +19,7 @@ export function isReaderQuestion(value: string): boolean {
   if (/\b(?:looking for guests|follow(?:ed)? (?:you )?back|follow for follow|subscribe to my|check out my|want to (?:collaborate|connect)|open to (?:a )?collaborat|where (?:can|do) i (?:subscribe|unsubscribe)|how (?:can|do) i unsubscribe)\b/i.test(value)) return false;
   return value.length >= 18 && (/\?/.test(value) || /\b(?:would love to (?:know|read)|could you (?:explain|cover)|please (?:explain|cover)|curious (?:about|whether|how)|wondering (?:if|how|whether)|what about)\b/i.test(value));
 }
-export async function discoverOpportunities(input: unknown, getJson = publicJson): Promise<OpportunityScan> {
+export async function discoverOpportunities(input: unknown, getJson = publicJson, getPage = getJson === publicJson ? publicPage : undefined): Promise<OpportunityScan> {
   const raw = obj(input);
   if (typeof raw.domain !== "string" || raw.domain.length > 300) throw new InvalidInputError("Choose a valid publication.");
   if (raw.sources !== undefined && (!Array.isArray(raw.sources) || raw.sources.length > 16 || raw.sources.some(s => typeof s !== "string" || s.length > 300))) throw new InvalidInputError("Choose up to 16 public source publications.");
@@ -26,7 +28,7 @@ export async function discoverOpportunities(input: unknown, getJson = publicJson
   let limited = false, requests = 0;
   const deadline = Date.now() + 75000;
   const read = async (url: string) => {
-    if (limited || requests >= 64 || Date.now() > deadline) throw new UpstreamTransientError("Cross-Substack request budget reached.");
+    if (limited || requests >= 96 || Date.now() > deadline) throw new UpstreamTransientError("Cross-Substack request budget reached.");
     requests++;
     try { return await getJson(url); } catch (e) { if (e instanceof RateLimitedError) limited = true; throw e; }
   };
@@ -46,7 +48,24 @@ export async function discoverOpportunities(input: unknown, getJson = publicJson
     post.text = plainComment(body.body_html ?? body.truncated_body_text ?? body.description, 6000);
   };
   const ownResults = await pooledMap(posts.slice(0, 10), p => enrich(p, domain), { concurrency: 3 });
-  const targets = [...new Set([...suppliedSources, ...suggestedSources(posts, focus)])].filter(s => s !== domain).slice(0, 16);
+  const writing = `${posts.map(articleText).join(" ")} ${focus}`;
+  const targets = [...new Set([...topicDiscoverySources(writing), ...suggestedSources(posts, focus), ...suppliedSources])].filter(s => s !== domain).slice(0, 16);
+  let recommendationsUnavailable = 0;
+  if (getPage) {
+    const pages = await pooledMap([domain, ...targets.slice(0, 3)], async host => {
+      if (limited || requests >= 96 || Date.now() > deadline) throw new UpstreamTransientError("Cross-Substack request budget reached.");
+      requests++;
+      try { return recommendedDomains(await getPage(`https://${host}/recommendations`), host); }
+      catch (error) { if (error instanceof RateLimitedError) limited = true; throw error; }
+    }, { concurrency: 2 });
+    recommendationsUnavailable = pages.filter(result => result.status === "rejected").length;
+    // Interleave recommendations from different writers instead of exhausting one writer's list.
+    const lists = pages.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+    for (let i = 0; i < 20 && targets.length < 24; i++) for (const list of lists) {
+      const host = list[i];
+      if (host && host !== domain && !targets.includes(host) && targets.length < 24) targets.push(host);
+    }
+  }
   const external: ExternalArticle[] = [];
   let publicationsScanned = 0;
   const sourceResults = await pooledMap(targets, async host => {
@@ -62,7 +81,7 @@ export async function discoverOpportunities(input: unknown, getJson = publicJson
   const ownTerms = new Set(tokens(`${posts.map(articleText).join(" ")} ${focus}`));
   const prioritized = external.map(p => ({ p, fit: [...new Set(tokens(articleText(p)))].filter(t => ownTerms.has(t)).length })).sort((a, b) => b.fit - a.fit);
   const perSource = new Map<string, number>();
-  const selectedText = prioritized.filter(({ p }) => { const n = perSource.get(p.domain) ?? 0; if (n >= 2) return false; perSource.set(p.domain, n + 1); return true; }).slice(0, 18);
+  const selectedText = prioritized.filter(({ p }) => { const n = perSource.get(p.domain) ?? 0; if (n >= 2) return false; perSource.set(p.domain, n + 1); return true; }).slice(0, 24);
   const textResults = await pooledMap(selectedText, ({ p }) => enrich(p, p.domain), { concurrency: 3 });
   const questions: ReaderQuestion[] = [], seen = new Set<string>();
   let commentsRead = 0;
@@ -96,5 +115,5 @@ export async function discoverOpportunities(input: unknown, getJson = publicJson
   const failed = results.filter(r => r.status === "rejected").length;
   const unavailable = sourceResults.filter(r => r.status === "rejected").length;
   const missingText = [...ownResults, ...textResults].filter(r => r.status === "rejected").length;
-  return { domain, posts, external: external.sort((a, b) => a.id.localeCompare(b.id)), publicationsScanned, questions: questions.sort((a, b) => a.id.localeCompare(b.id)), commentsRead, scannedAt: new Date().toISOString(), warnings: [ ...(unavailable ? [`${unavailable} outside publications were unavailable; discovery covers accessible sources only.`] : []), ...(missingText ? [`Public article text was unavailable for ${missingText} articles; those comparisons use metadata.`] : []), ...(failed ? [`Discussions on ${failed} posts were unavailable or reached the request limit.`] : []), ...(limited ? ["Substack rate limited the scan. Wait before refreshing."] : []) ] };
+  return { domain, posts, external: external.sort((a, b) => a.id.localeCompare(b.id)), publicationsScanned, questions: questions.sort((a, b) => a.id.localeCompare(b.id)), commentsRead, scannedAt: new Date().toISOString(), warnings: [ ...(recommendationsUnavailable ? [`${recommendationsUnavailable} public recommendation pages were unavailable; research continues with accessible sources.`] : []), ...(unavailable ? [`${unavailable} outside publications were unavailable; discovery covers accessible sources only.`] : []), ...(missingText ? [`Public article text was unavailable for ${missingText} articles; those comparisons use metadata.`] : []), ...(failed ? [`Discussions on ${failed} posts were unavailable or reached the request limit.`] : []), ...(requests >= 96 || Date.now() > deadline ? ["Research reached its request or time budget; results are partial."] : []), ...(limited ? ["Substack rate limited the scan. Wait before refreshing."] : []) ] };
 }

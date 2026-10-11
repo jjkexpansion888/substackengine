@@ -2,6 +2,7 @@ import { publicJson, publicationDomain } from "@/lib/substack/publicRadar";
 import { InvalidInputError, RateLimitedError, UpstreamTransientError } from "@/lib/substack/errors";
 import { pooledMap } from "@/lib/substack/concurrency";
 import type { CollaborationCandidate, CollaborationPost, CollaborationScan } from "./types";
+import { topicDiscoverySources } from "./topicDiscovery";
 
 type Obj = Record<string, unknown>;
 const obj = (x: unknown): Obj => x && typeof x === "object" && !Array.isArray(x) ? x as Obj : {};
@@ -11,7 +12,7 @@ const count = (x: unknown) => typeof x === "number" && Number.isFinite(x) && x >
 const url = (x: unknown) => { try { const u = new URL(text(x)); return u.protocol === "https:" && !u.username && !u.password ? u.href : null; } catch { return null; } };
 const handlePattern = /^[a-z0-9_-]{1,100}$/i;
 export type DiscoveryPerson = { handle: string; comments: number; author: boolean; domain?: string | null; name?: string; publication?: string; description?: string; audience?: number | null; audienceLabel?: string; photoUrl?: string | null };
-export type DiscoveryInput = { domain: string; people: DiscoveryPerson[]; seeds: string[] };
+export type DiscoveryInput = { domain: string; people: DiscoveryPerson[]; seeds: string[]; writing?: string; excludeDomains?: string[] };
 
 export function parseDiscoveryInput(raw: unknown): DiscoveryInput {
   const body = obj(raw);
@@ -29,7 +30,9 @@ export function parseDiscoveryInput(raw: unknown): DiscoveryInput {
     if (typeof value !== "string" || value.length > 300) throw new InvalidInputError("Enter valid publication domains.");
     return publicationDomain(value);
   });
-  return { domain, people: [...new Map(people.map(p => [p.handle, p])).values()], seeds: [...new Set(seeds)].filter(s => s !== domain) };
+  if (body.writing !== undefined && (typeof body.writing !== "string" || body.writing.length > 30000)) throw new InvalidInputError("Writing context is too large.");
+  if (body.excludeDomains !== undefined && (!Array.isArray(body.excludeDomains) || body.excludeDomains.length > 500 || body.excludeDomains.some(value => typeof value !== "string" || value.length > 300))) throw new InvalidInputError("Invalid previous discovery list.");
+  return { domain, people: [...new Map(people.map(p => [p.handle, p])).values()], seeds: [...new Set(seeds)].filter(s => s !== domain), writing: typeof body.writing === "string" ? body.writing : "", excludeDomains: list(body.excludeDomains).map(value => publicationDomain(String(value))) };
 }
 
 export async function discoverCollaborators(input: DiscoveryInput, getJson = publicJson): Promise<CollaborationScan> {
@@ -37,7 +40,7 @@ export async function discoverCollaborators(input: DiscoveryInput, getJson = pub
   let stopped = false, requests = 0;
   const warnings: string[] = [];
   const read = async (target: string) => {
-    if (stopped || Date.now() > deadline || requests >= 90) throw new UpstreamTransientError("Collaboration scan budget reached.");
+    if (stopped || Date.now() > deadline || requests >= 160) throw new UpstreamTransientError("Collaboration scan budget reached.");
     requests++;
     try { return await getJson(target); } catch (error) { if (error instanceof RateLimitedError) stopped = true; throw error; }
   };
@@ -45,8 +48,9 @@ export async function discoverCollaborators(input: DiscoveryInput, getJson = pub
   const candidates = new Map<string, CollaborationCandidate>();
   const pending = new Map<string, Promise<void>>();
   const expansion = new Set<string>();
+  const excluded = new Set(input.excludeDomains ?? []);
   const loadPublication = async (domain: string, profile: Obj, source: CollaborationCandidate["source"], relationship: number) => {
-    if (domain === input.domain || candidates.has(domain)) return;
+    if (domain === input.domain || excluded.has(domain) || candidates.has(domain)) return;
     const raw = await read(`https://${domain}/api/v1/archive?sort=new&limit=8`);
     if (!Array.isArray(raw)) throw new Error("Archive unavailable");
     const archive = raw.map(obj).slice(0, 8);
@@ -104,15 +108,18 @@ export async function discoverCollaborators(input: DiscoveryInput, getJson = pub
     const domain = publicationDomain(text(pub.custom_domain) || `${text(pub.subdomain)}.substack.com`);
     await scanPublication(domain, { ...profile, primaryPublication: pub }, source, relationship);
   };
-  const community = input.people.filter(p => !p.author && p.domain !== null && p.domain !== input.domain).sort((a, b) => Number(!!b.domain) - Number(!!a.domain) || b.comments - a.comments).slice(0, 18);
+  const eligible = input.people.filter(p => !p.author && p.domain !== null && p.domain !== input.domain && (!p.domain || !excluded.has(p.domain)));
+  const community = eligible.sort((a, b) => Number(!!b.domain) - Number(!!a.domain) || b.comments - a.comments || (b.audience ?? -1) - (a.audience ?? -1)).slice(0, 36);
+  const outside = [...new Set([...topicDiscoverySources(input.writing ?? ""), ...input.seeds])].filter(domain => domain !== input.domain);
   const tasks = [
-    ...input.seeds.map(domain => async () => {
+    ...outside.map(domain => async () => {
       const raw = await read(`https://${domain}/api/v1/archive?sort=new&limit=1`);
       const byline = obj(list(obj(list(raw)[0]).publishedBylines)[0]);
       const handle = text(byline.handle);
       let profile = byline;
       if (handlePattern.test(handle)) { try { profile = obj(await read(`https://substack.com/api/v1/user/${encodeURIComponent(handle)}/public_profile`)); } catch { /* The archive can still provide evidence. */ } }
-      await scanPublication(domain, profile, "seed", 0);
+      await scanPublication(domain, profile, input.seeds.includes(domain) ? "seed" : "extended", 0);
+      if (!input.seeds.includes(domain) && candidates.has(domain)) candidates.get(domain)!.evidence.push("Discovered across Substack from semantic alignment with your writing");
     }),
     ...community.map(person => () => person.domain ? scanPublication(person.domain, {
       name: person.name, handle: person.handle, photo_url: person.photoUrl, subscriberCountNumber: person.audience, subscriberCount: person.audienceLabel,
@@ -122,12 +129,12 @@ export async function discoverCollaborators(input: DiscoveryInput, getJson = pub
   const results = await pooledMap(tasks, task => task(), { concurrency: 3 });
   const failed = results.filter(r => r.status === "rejected").length;
   if (failed) warnings.push(`${failed} profile or publication scans were unavailable.`);
-  const checked = new Set([...input.people.map(p => p.handle), ...candidates.values()].flatMap(v => typeof v === "string" ? [v] : v.profileUrl ? [v.profileUrl.split("@")[1]] : []));
-  const extended = [...expansion].filter(h => !checked.has(h)).slice(0, 6);
+  const checked = new Set([...community.map(p => p.handle), ...candidates.values()].flatMap(v => typeof v === "string" ? [v] : v.profileUrl ? [v.profileUrl.split("@")[1]] : []));
+  const extended = [...expansion].filter(h => !checked.has(h)).slice(0, 16);
   const extendedResults = await pooledMap(extended, handle => scanProfile(handle, "extended", 0), { concurrency: 2 });
   if (extendedResults.some(r => r.status === "rejected")) warnings.push("Some extended-network profiles could not be checked.");
   if (stopped) warnings.push("Substack rate limited this scan. Further requests were stopped.");
-  if (Date.now() > deadline || requests >= 90) warnings.push("The scan reached its request budget; results are partial.");
-  if (input.people.length > 18) warnings.push("Community discovery sampled the 18 most active eligible profiles; add publications to explore further.");
+  if (Date.now() > deadline || requests >= 160) warnings.push("The scan reached its request budget; results are partial.");
+  if (eligible.length > 36) warnings.push("Community discovery sampled 36 eligible profiles alongside outside-publication research.");
   return { candidates: [...candidates.values()], warnings, requests, scannedAt: new Date().toISOString() };
 }

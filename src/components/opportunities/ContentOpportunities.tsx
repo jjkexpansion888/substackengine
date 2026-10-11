@@ -41,7 +41,7 @@ export function ContentOpportunities({ radar }: { radar: PublicRadar }) {
       if (typeof data.sources === "string") setSources(data.sources.slice(0, 2000));
     } catch { setError("Saved planning data could not be loaded."); }
     setLoaded(true);
-  }, [key]);
+  }, [key, radar.domain]);
   useEffect(() => {
     if (!loaded) return;
     try { localStorage.setItem(key, JSON.stringify({ entries, interests, questions, sources, scan })); }
@@ -58,8 +58,7 @@ export function ContentOpportunities({ radar }: { radar: PublicRadar }) {
     setBusy(true); setError(""); setRemoved(null);
     try {
       const extraSources = sources.split(/[\s,]+/).filter(Boolean).slice(0, 6);
-      const community = [...new Set(radar.people.flatMap(p => p.publicationDomain && p.publicationDomain !== radar.domain ? [p.publicationDomain] : []))].slice(0, 6);
-      const response = await fetch("/api/opportunities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain: radar.domain, focus: interests, sources: [...new Set([...extraSources, ...community])] }), signal: AbortSignal.timeout(90000) });
+      const response = await fetch("/api/opportunities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain: radar.domain, focus: interests, sources: [...new Set(extraSources)] }), signal: AbortSignal.timeout(90000) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? "The public scan could not be completed.");
       setScan(body); setSelected(null);
