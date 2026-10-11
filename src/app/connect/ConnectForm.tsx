@@ -11,7 +11,7 @@ import { ContentOpportunities } from "@/components/opportunities/ContentOpportun
 import { type SubscriberImport } from "@/lib/substack/subscriberRanking";
 import { readSubscriberImport, saveSubscriberImport, removeSubscriberImport } from "@/lib/substack/browserImportStorage";
 import type { PublicAudienceSnapshot } from "@/lib/substack/publicAudienceCache";
-import type { SavedRadar } from "@/lib/substack/savedRadar";
+import { loadWorkspaceRadar, saveWorkspaceRadar, removeWorkspaceRadar } from "@/lib/substack/browserRadarStorage";
 import { mergeAudienceResults, pendingAudienceProfiles, type EnrichedAudience } from "@/lib/substack/audienceQueue";
 import { radarFeatures } from "@/lib/radar/featureAccess";
 import { applyCsvRoster } from "@/lib/substack/csvRoster";
@@ -93,10 +93,7 @@ export function ConnectForm() {
     if (target) {
       setDomain(target);
       let active = true;
-      void fetch(`/api/saved-radar?domain=${encodeURIComponent(target)}`, { cache: "no-store" }).then(async response => {
-        if (!response.ok) throw new Error("No saved scan available.");
-        return (await response.json()).snapshot as SavedRadar | null;
-      }).then(snapshot => {
+      void loadWorkspaceRadar(target, browserStorage()).then(snapshot => {
         if (!active) return;
         if (!snapshot) { void scan(target); return; }
         importedList.current = snapshot.subscriberImport ? { domain: snapshot.radar.domain, packet: snapshot.subscriberImport } : null;
@@ -158,8 +155,7 @@ export function ConnectForm() {
       // Serialize writes so an earlier scan cannot overwrite newer recovered counts.
       saves.current = saves.current.catch(() => {}).then(async () => {
         try {
-          const response = await fetch("/api/saved-radar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot) });
-          if (!response.ok) throw new Error("Local save failed.");
+          await saveWorkspaceRadar(snapshot, browserStorage());
           setSaveStatus("saved");
         } catch { setSaveStatus("error"); }
       });
@@ -217,8 +213,7 @@ export function ConnectForm() {
     setPhase({ kind: "connecting" });
     try {
       await saves.current;
-      const response = await fetch(`/api/saved-radar?domain=${encodeURIComponent(radar.domain)}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Could not remove the saved list.");
+      await removeWorkspaceRadar(radar.domain, browserStorage());
       removeSubscriberImport(radar.domain, browserStorage());
       importedList.current = null;
       await scan(radar.domain);
@@ -230,8 +225,7 @@ export function ConnectForm() {
     setReturningToSearch(true);
     try {
       await saves.current;
-      const response = await fetch("/api/saved-radar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: 1, radar, subscriberImport: importedList.current?.domain === radar.domain ? importedList.current.packet : undefined }) });
-      if (!response.ok) throw new Error("Could not save these results before returning to search.");
+      await saveWorkspaceRadar({ version: 1, radar, subscriberImport: importedList.current?.domain === radar.domain ? importedList.current.packet : undefined }, browserStorage());
       setRadar(null);
       setDomain("");
       setSearch("");

@@ -14,7 +14,7 @@ export function BrandLogo({
   showWordmark = false,
   className,
   priority = false,
-  label = "Baekho Research Radar",
+  label = "Substack Engine",
 }: BrandLogoProps) {
   return (
     <span
@@ -34,8 +34,8 @@ export function BrandLogo({
       />
       {showWordmark && (
         <span className={styles.wordmark} aria-hidden="true">
-          <span className={styles.name}>Baekho Research</span>
-          <span className={styles.product}>Radar</span>
+          <span className={styles.name}>Substack Engine</span>
+          <span className={styles.product}>Publication research</span>
         </span>
       )}
     </span>

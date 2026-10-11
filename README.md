@@ -2,6 +2,8 @@
 
 MIT-licensed and self-hostable. [Deploy your own private instance on Railway](DEPLOYMENT.md). Each deployment starts with its own empty workspace; private subscriber data is never bundled with the code.
 
+Shared hosting is also supported: `DEPLOYMENT_MODE=shared` gives each visitor an independent browser workspace for their own publication, without a shared login or server-stored roster. All three features use the selected publication, not Baekho-specific defaults. This does not provide verified Substack account sign-in or cross-device account sync. See [deployment modes](DEPLOYMENT.md).
+
 Substack Engine combines public audience research with collaboration and editorial planning tools, built with Next.js. Enter a Substack subdomain, publication URL, custom domain, or profile URL (`substack.com/@handle`) to use all three features without logging in or installing an extension. Profile URLs and `@handles` resolve to the profile's primary publication. Subscriber CSV import is optional.
 
 ## Capabilities

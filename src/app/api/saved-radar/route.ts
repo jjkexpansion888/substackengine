@@ -1,8 +1,9 @@
 import { loadRadar, removeSavedRadar, saveRadar } from "@/lib/substack/savedRadar";
 import { isLocalRequest } from "@/lib/api/localRequest";
+import { isSharedDeployment } from "@/lib/api/privateDeployment";
 
 export const runtime = "nodejs";
-const allowed = isLocalRequest;
+const allowed = async (request: Request, write = false) => !isSharedDeployment() && await isLocalRequest(request, write);
 const headers = { "Cache-Control": "no-store" };
 
 export async function GET(request: Request): Promise<Response> {

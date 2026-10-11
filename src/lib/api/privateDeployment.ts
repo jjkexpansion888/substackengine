@@ -1,5 +1,10 @@
 export function isPrivateDeployment(): boolean {
+  if (isSharedDeployment()) return false;
   return process.env.DEPLOYMENT_MODE === "private" || !!process.env.RAILWAY_ENVIRONMENT_ID;
+}
+
+export function isSharedDeployment(): boolean {
+  return process.env.DEPLOYMENT_MODE === "shared";
 }
 
 export function privateOrigin(): string | null {
