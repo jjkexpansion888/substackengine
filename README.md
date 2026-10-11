@@ -1,5 +1,7 @@
 # Substack Engine
 
+MIT-licensed and self-hostable. [Deploy your own private instance on Railway](DEPLOYMENT.md). Each deployment starts with its own empty workspace; private subscriber data is never bundled with the code.
+
 Substack Engine combines public audience research with collaboration and editorial planning tools, built with Next.js. Enter a Substack subdomain, publication URL, custom domain, or profile URL (`substack.com/@handle`) to use all three features without logging in or installing an extension. Profile URLs and `@handles` resolve to the profile's primary publication. Subscriber CSV import is optional.
 
 ## Capabilities
@@ -113,4 +115,4 @@ The UI uses system fonts and does not download fonts at build time.
 
 ## Deployment Limits
 
-CSV imports and saved rosters are designed for a trusted, single-user local instance. Public-count caches live in process memory, saved rosters use local disk, and planning records use browser storage. Do not expose roster endpoints as a shared public service without authentication, authorization, and a suitable persistent storage design. A serverless deployment is not a drop-in replacement for these local workflows.
+CSV imports and saved rosters are designed for a trusted, single-owner instance. Private hosting uses HTTPS Basic authentication with a long random password and persistent disk storage; Railway enforces the authentication configuration. Public-count caches live in process memory, saved rosters use disk, and planning records use browser storage. Follow [the self-hosting guide](DEPLOYMENT.md). This is not a multi-user service; other writers should deploy independent instances. A serverless deployment is not a drop-in replacement for these workflows.

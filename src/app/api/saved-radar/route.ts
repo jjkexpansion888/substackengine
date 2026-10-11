@@ -6,13 +6,13 @@ const allowed = isLocalRequest;
 const headers = { "Cache-Control": "no-store" };
 
 export async function GET(request: Request): Promise<Response> {
-  if (!allowed(request)) return Response.json({ error: "Saved scans are available only in the local app." }, { status: 403 });
+  if (!await allowed(request)) return Response.json({ error: "Saved scans require trusted workspace access." }, { status: 403 });
   try { return Response.json({ snapshot: await loadRadar(new URL(request.url).searchParams.get("domain") ?? "") }, { headers }); }
   catch { return Response.json({ error: "Could not read the saved scan." }, { status: 400, headers }); }
 }
 
 export async function POST(request: Request): Promise<Response> {
-  if (!allowed(request, true)) return Response.json({ error: "Save scans from the local app." }, { status: 403 });
+  if (!await allowed(request, true)) return Response.json({ error: "Save scans from the trusted workspace." }, { status: 403 });
   try {
     const reader = request.body?.getReader();
     if (!reader) throw new Error("No scan sent.");
@@ -31,7 +31,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  if (!allowed(request, true)) return Response.json({ error: "Remove saved scans from the local app." }, { status: 403 });
+  if (!await allowed(request, true)) return Response.json({ error: "Remove saved scans from the trusted workspace." }, { status: 403 });
   try {
     await removeSavedRadar(new URL(request.url).searchParams.get("domain") ?? "");
     return Response.json({ removed: true }, { headers });

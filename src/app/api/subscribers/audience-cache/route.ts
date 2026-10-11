@@ -5,7 +5,7 @@ import { isLocalRequest } from "@/lib/api/localRequest";
 export const runtime = "nodejs";
 
 export async function POST(request: Request): Promise<Response> {
-  if (!isLocalRequest(request, true)) return Response.json({ error: "Use the local app." }, { status: 403 });
+  if (!await isLocalRequest(request, true)) return Response.json({ error: "Use the trusted workspace." }, { status: 403 });
   try {
     const body = await request.json();
     if (!Array.isArray(body.identities) || body.identities.length > 10000) throw new Error("Invalid profile batch.");

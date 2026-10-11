@@ -4,7 +4,7 @@ import { isLocalRequest } from "@/lib/api/localRequest";
 export const maxDuration = 90;
 
 export async function POST(request: Request) {
-  if (!isLocalRequest(request, true)) return Response.json({ error: "Use the local app." }, { status: 403 });
+  if (!await isLocalRequest(request, true)) return Response.json({ error: "Use the trusted workspace." }, { status: 403 });
   let body: { subscribers?: unknown };
   try { body = await request.json(); } catch { return Response.json({ error: "Invalid names." }, { status: 400 }); }
   const rows = body?.subscribers;

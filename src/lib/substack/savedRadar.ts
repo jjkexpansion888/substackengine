@@ -5,7 +5,7 @@ import type { PublicRadar } from "./publicRadar";
 import { parseSubscriberImport, type SubscriberImport } from "./subscriberRanking";
 import { rememberPublicAudience } from "./publicAudienceCache";
 
-const directory = join(process.cwd(), ".local-data", "radar");
+const directory = join(process.env.SUBSTACK_DATA_DIR || join(process.cwd(), ".local-data"), "radar");
 const domainPattern = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid saved scan.");
